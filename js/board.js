@@ -97,7 +97,7 @@ export class BoardView {
   renderTop() {
     const st = this.store, t = this.elTop;
     const bits = [];
-    if (this.isTeacher) bits.push(h('button', { class: 'btn quiet sm', onclick: () => this.onExit(), 'aria-label': 'Back to my boards' }, iconEl('back', 18), h('span', { class: 'lbl' }, 'Boards')));
+    if (this.isTeacher) bits.push(h('button', { class: 'btn quiet sm', onclick: () => this.onExit(), 'aria-label': 'Back to my boards' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Boards')));
     bits.push(h('span', { class: 'brand' }, h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' })));
     bits.push(h('span', { class: 'title', title: st.board.title }, st.board.title));
     this.elStatus = h('span', { class: 'status', role: 'status' }, 'Saved');
@@ -110,8 +110,8 @@ export class BoardView {
     if (this.isTeacher) {
       this.btnFollow = h('button', { class: 'btn sm', onclick: () => this.toggleFollow(), 'aria-pressed': 'false', title: 'Students see the page and zoom you are looking at' }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Follow me'));
       this.btnLock = h('button', { class: 'btn sm', onclick: () => this.toggleLock(), 'aria-pressed': 'false' }, iconEl('lock', 18), h('span', { class: 'lbl' }, 'Lock writing'));
-      this.btnClear = h('button', { class: 'btn sm', onclick: () => this.clearDialog() }, iconEl('clear', 18), h('span', { class: 'lbl' }, 'Clear'));
-      this.btnShare = h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'lbl' }, 'Share'));
+      this.btnClear = h('button', { class: 'btn sm', onclick: () => this.clearDialog() }, iconEl('clear', 18), h('span', { class: 'lbl lbl-opt' }, 'Clear'));
+      this.btnShare = h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'lbl lbl-opt' }, 'Share'));
       this.btnPeople = h('button', { class: 'btn sm', onclick: () => this.togglePanel('people') }, iconEl('people', 18), h('span', { class: 'lbl' }, 'People '), h('b', { class: 'cnt' }, '0'));
       bits.push(this.btnFollow, this.btnLock, this.btnClear, this.btnShare, this.btnPeople);
     }
@@ -765,6 +765,8 @@ export class BoardView {
     setTimeout(() => this.onResize(), 30);
   }
 
+  setSide(...nodes) { this.elSide.replaceChildren(...nodes.filter(Boolean)); }
+
   renderPanel() {
     if (!this.panel) return;
     if (this.panel === 'pages') this.renderPagesPanel(); else this.renderPeoplePanel();
@@ -783,7 +785,7 @@ export class BoardView {
       foot.push(h('button', { class: 'btn sm primary', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), 'Add pages'));
       foot.push(h('button', { class: 'btn sm danger', disabled: ps.length < 1, onclick: () => this.deleteCurrentPage() }, iconEl('trash', 18), 'Delete this page'));
     }
-    this.elSide.replaceChildren(
+    this.setSide(
       h('header', null, `Pages (${ps.length})`, h('button', { class: 'ib', 'aria-label': 'Close pages', onclick: () => this.togglePanel('pages') }, iconEl('close'))),
       h('div', { class: 'scroll' }, list.length ? list : h('p', { class: 'hint' }, 'No pages yet.')),
       foot.length ? h('footer', null, foot) : null);
@@ -853,7 +855,7 @@ export class BoardView {
           h('button', { class: 'x', title: 'Show only this student\'s ink', 'aria-label': `Show only ${p.name}'s ink`, 'aria-pressed': String(this.focusPerson === p.id), onclick: () => { this.focusPerson = this.focusPerson === p.id ? null : p.id; this.renderInk(); this.renderPeoplePanel(); } }, iconEl('eye', 18)),
           h('button', { class: 'x', title: 'Remove student', 'aria-label': `Remove ${p.name}`, onclick: () => this.removeStudent(p) }, iconEl('trash', 18))));
     });
-    this.elSide.replaceChildren(
+    this.setSide(
       h('header', null, `People (${onl.length} online)`, h('button', { class: 'ib', 'aria-label': 'Close people', onclick: () => this.togglePanel('people') }, iconEl('close'))),
       h('div', { class: 'scroll' }, rows.length ? rows : h('p', { class: 'hint' }, 'No students have joined yet. Share the link or the code so they can type their name.')),
       this.focusPerson ? h('footer', null, h('button', { class: 'btn sm', onclick: () => { this.focusPerson = null; this.renderInk(); this.renderPeoplePanel(); } }, 'Show everyone\'s ink')) : null);

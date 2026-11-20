@@ -96,7 +96,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .entry { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(320px, 520px) 1fr; }
 .entry .side { padding: clamp(24px, 6vw, 64px); display: flex; flex-direction: column; justify-content: center; gap: 28px; border-right: 2px solid var(--ink); background: var(--paper); }
 .entry .art { background: var(--desk); display: grid; place-items: center; padding: 32px; overflow: hidden; }
-.entry .art svg { width: min(100%, 520px); height: auto; }
+.entry .art > div { width: min(100%, 520px); }
+.entry .art svg { width: 100%; height: auto; display: block; }
 .entry h1 { font-size: clamp(28px, 4vw, 40px); }
 .entry .lead { color: var(--ink-2); font-size: 18px; max-width: 34ch; }
 .entry form { width: 100%; max-width: 380px; }
@@ -229,6 +230,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
 .copybox .input { font-size: 15px; min-height: 44px; }
 .code-big { font-size: 40px; font-weight: 600; letter-spacing: .18em; padding: 8px 14px; border: 2px dashed var(--ink); text-align: center; background: #fff; }
 
+@media (max-width: 1180px) { .b-top .btn { padding: 0 10px; } .b-top .lbl-opt { display: none; } }
+
 /* narrow: toolbar moves to the bottom */
 @media (max-width: 719px) {
   .only-wide { display: none !important; }
@@ -244,7 +247,8 @@ svg.i { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor;
   .b-rail { flex-direction: row; border-right: 0; border-top: 2px solid var(--ink); overflow-x: auto; overflow-y: hidden; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
   .b-rail .rule { width: 2px; height: auto; margin: 6px 4px; align-self: stretch; }
   .tool { width: 60px; min-height: 56px; }
-  .b-side { position: fixed; right: 0; top: 104px; bottom: 0; z-index: 50; width: min(260px, 82vw); }
+  .b-side { position: fixed; right: 0; top: 0; bottom: 0; z-index: 60; width: min(300px, 86vw); box-shadow: -6px 0 0 rgba(29,33,39,.18); }
+  .b-side.wide { width: min(340px, 92vw); }
   .board.side-closed { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "opts" "stage" "rail"; }
   .b-top .brand img.word { display: none; }
 }
