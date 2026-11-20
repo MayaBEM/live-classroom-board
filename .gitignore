@@ -1,0 +1,5 @@
+_test/
+dev-server.mjs
+.claude/
+.DS_Store
+*.zip
