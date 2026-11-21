@@ -2,29 +2,38 @@
 import { h, uuid, clamp, debounce, throttle, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE } from './util.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS } from './render.js';
 import { renderPdfPage, getImage } from './pdf.js';
+import { PageRenderer } from './thumbs.js';
+import { exportDialog } from './export.js';
 import { friendlyError } from './db.js';
 import { openAddPages } from './pages.js';
 
 const TOOLS = [
   ['move', 'Move', 'move'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
   ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow'], ['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'],
-  ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
+  ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
 ];
+const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const SHAPES = new Set(['line', 'arrow', 'rect', 'ellipse']);
 const MIN_S = 0.12, MAX_S = 8;
 
 export class BoardView {
-  constructor({ sb, store, role, root, onExit, code }) {
-    Object.assign(this, { sb, store, role, root, onExit, code });
+  // embedded: the review screen owns the store; studentNav: { name, index, count, prev(), next(), back() } for a teacher looking at one student's copy
+  constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null }) {
+    Object.assign(this, { sb, store, role, root, onExit, code, embedded, studentNav });
     this.isTeacher = role === 'teacher';
-    this.tool = 'pen'; this.color = PEN_COLORS[0][1]; this.hlColor = HL_COLORS[0][1]; this.sizeIdx = 1;
+    this.assign = store.mode === 'assignment';
+    this.review = this.isTeacher && this.assign;        // teacher looking at one student's copy
+    this.copy = !this.isTeacher && this.assign;         // a student's own copy
+    this.renderer = renderer || new PageRenderer(sb);
+    this.stampKind = 'check'; this.lastFeedbackToast = 0;
+    this.tool = 'pen'; this.color = this.review ? '#D62F2F' : PEN_COLORS[0][1]; this.hlColor = HL_COLORS[0][1]; this.sizeIdx = 1;
     this.pageId = null; this.view = { s: 1, tx: 0, ty: 0 }; this.q = 1; this.autoFit = true;
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.penSeen = false; this.baseTok = 0; this.thumbs = new Map(); this.thumbBases = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.penSeen = false; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -44,7 +53,8 @@ export class BoardView {
       st.on('laser', p => this.onLaser(p)),
       st.on('view', v => this.onRemoteView(v)),
       st.on('presence', s => this.onPresence(s)),
-      st.on('participants', () => { if (this.panel === 'people') this.loadPeople(); }),
+      st.on('participants', () => { if (this.panel === 'people') this.loadPeople(); if (this.review) { this.updateTopState(); } }),
+      st.on('me', () => this.onMe()),
       st.on('denied', () => toast(st.board && st.board.locked ? 'Writing is locked by your teacher.' : 'That change was not saved.', 'bad')),
       st.on('removed', () => this.showRemoved()),
     ];
@@ -57,13 +67,17 @@ export class BoardView {
     else this.showEmpty();
     this.onBoard(true);
     st.track({ name: st.name, role: this.role, page: first ? 1 : null });
+    if (this.review) st.watchStudent(st.scopeId);
+    if (this.copy) { const me0 = st.me || {}; this.prevMe = { score: me0.score, comment: me0.comment }; st.curPage = first ? 1 : null; this.lockTimer = setInterval(() => this.tickLock(), 20000); this.lastLock = this.lockReason(); }
   }
 
   destroy() {
     document.body.classList.remove('in-board');
     this.unsubs.forEach(u => u()); this.ro.disconnect();
     document.removeEventListener('keydown', this.keyHandler); document.removeEventListener('keyup', this.keyUp);
-    clearInterval(this.tick); this.store.close();
+    clearInterval(this.tick); clearInterval(this.lockTimer);
+    if (this.review) this.store.unwatch();
+    if (!this.embedded) this.store.close();
   }
 
   buildUI() {
@@ -95,25 +109,44 @@ export class BoardView {
 
   // ----------------------------------------------------------------- top bar
   renderTop() {
-    const st = this.store, t = this.elTop;
-    const bits = [];
-    if (this.isTeacher) bits.push(h('button', { class: 'btn quiet sm', onclick: () => this.onExit(), 'aria-label': 'Back to my boards' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Boards')));
-    bits.push(h('span', { class: 'brand' }, h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' })));
-    bits.push(h('span', { class: 'title', title: st.board.title }, st.board.title));
+    const st = this.store, t = this.elTop, bits = [];
+    const brand = h('span', { class: 'brand' }, h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' }));
     this.elStatus = h('span', { class: 'status', role: 'status' }, 'Saved');
-    bits.push(this.elStatus);
-    bits.push(h('span', { class: 'grow' }));
+    const grow = () => h('span', { class: 'grow' });
     this.elFollowTag = h('span', { class: 'tag', hidden: true });
-    this.elLockTag = h('span', { class: 'tag warn', hidden: true }, iconEl('lock', 16), h('span', { class: 'lbl long' }, 'Writing is locked'), h('span', { class: 'lbl short' }, 'Locked'));
+    this.elLockTag = h('span', { class: 'tag warn', hidden: true });
     this.btnBackToTeacher = h('button', { class: 'btn primary sm', hidden: true, onclick: () => this.rejoinTeacher() }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Back to teacher'));
-    bits.push(this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
-    if (this.isTeacher) {
-      this.btnFollow = h('button', { class: 'btn sm', onclick: () => this.toggleFollow(), 'aria-pressed': 'false', title: 'Students see the page and zoom you are looking at' }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Follow me'));
-      this.btnLock = h('button', { class: 'btn sm', onclick: () => this.toggleLock(), 'aria-pressed': 'false' }, iconEl('lock', 18), h('span', { class: 'lbl' }, 'Lock writing'));
-      this.btnClear = h('button', { class: 'btn sm', onclick: () => this.clearDialog() }, iconEl('clear', 18), h('span', { class: 'lbl lbl-opt' }, 'Clear'));
-      this.btnShare = h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'lbl lbl-opt' }, 'Share'));
-      this.btnPeople = h('button', { class: 'btn sm', onclick: () => this.togglePanel('people') }, iconEl('people', 18), h('span', { class: 'lbl' }, 'People '), h('b', { class: 'cnt' }, '0'));
-      bits.push(this.btnFollow, this.btnLock, this.btnClear, this.btnShare, this.btnPeople);
+
+    if (this.review) {
+      const nav = this.studentNav;
+      bits.push(h('button', { class: 'btn quiet sm', onclick: () => nav.back(), 'aria-label': 'Back to the class overview' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Class')));
+      bits.push(brand);
+      bits.push(h('button', { class: 'ib', 'aria-label': 'Previous student', title: 'Previous student', disabled: nav.count < 2, onclick: () => nav.prev() }, iconEl('left')));
+      bits.push(h('span', { class: 'title', title: nav.name }, nav.name));
+      bits.push(h('button', { class: 'ib', 'aria-label': 'Next student', title: 'Next student', disabled: nav.count < 2, onclick: () => nav.next() }, iconEl('right')));
+      this.elStudentTag = h('span', { class: 'tag' });
+      bits.push(this.elStatus, this.elStudentTag, grow());
+      this.btnScore = h('button', { class: 'btn sm primary', onclick: () => this.scoreDialog() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Score and comment'));
+      this.btnExport = h('button', { class: 'btn sm', onclick: () => this.exportThis() }, iconEl('file', 18), h('span', { class: 'lbl lbl-opt' }, 'Export PDF'));
+      bits.push(this.btnScore, this.btnExport);
+    } else if (this.copy) {
+      this.elDueTag = h('span', { class: 'tag', hidden: true });
+      this.elScoreTag = h('span', { class: 'tag', hidden: true });
+      this.btnFeedback = h('button', { class: 'btn sm', hidden: true, title: 'Teacher comment', 'aria-label': 'Teacher comment', onclick: () => this.feedbackDialog() }, iconEl('file', 18), h('span', { class: 'lbl' }, 'Teacher comment'));
+      this.btnSubmit = h('button', { class: 'btn primary sm', onclick: () => this.submitWork() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Submit'));
+      bits.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus, grow(), this.elDueTag, this.elScoreTag, this.btnFeedback, this.elLockTag, this.btnSubmit);
+    } else {
+      this.elLockTag.append(iconEl('lock', 16), h('span', { class: 'lbl long' }, 'Writing is locked'), h('span', { class: 'lbl short' }, 'Locked'));
+      if (this.isTeacher) bits.push(h('button', { class: 'btn quiet sm', onclick: () => this.onExit(), 'aria-label': 'Back to my boards' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Boards')));
+      bits.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus, grow(), this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
+      if (this.isTeacher) {
+        this.btnFollow = h('button', { class: 'btn sm', onclick: () => this.toggleFollow(), 'aria-pressed': 'false', title: 'Students see the page and zoom you are looking at' }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Follow me'));
+        this.btnLock = h('button', { class: 'btn sm', onclick: () => this.toggleLock(), 'aria-pressed': 'false' }, iconEl('lock', 18), h('span', { class: 'lbl' }, 'Lock writing'));
+        this.btnClear = h('button', { class: 'btn sm', onclick: () => this.clearDialog() }, iconEl('clear', 18), h('span', { class: 'lbl lbl-opt' }, 'Clear'));
+        this.btnShare = h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'lbl lbl-opt' }, 'Share'));
+        this.btnPeople = h('button', { class: 'btn sm', onclick: () => this.togglePanel('people') }, iconEl('people', 18), h('span', { class: 'lbl' }, 'People '), h('b', { class: 'cnt' }, '0'));
+        bits.push(this.btnFollow, this.btnLock, this.btnClear, this.btnShare, this.btnPeople);
+      }
     }
     this.btnPages = h('button', { class: 'btn sm', onclick: () => this.togglePanel('pages') }, iconEl('pages', 18), h('span', { class: 'lbl' }, 'Pages'));
     bits.push(this.btnPages);
@@ -122,10 +155,40 @@ export class BoardView {
     this.updateTopState();
   }
 
+  // why a student cannot write right now ('' = can write)
+  lockReason() {
+    const b = this.store.board, me = this.store.me;
+    if (!b || this.isTeacher) return '';
+    if (this.assign) {
+      if (me && me.submitted_at) return 'submitted';
+      if (b.locked) return 'locked';
+      if (b.starts_at && new Date(b.starts_at) > Date.now()) return 'notstarted';
+      if (b.due_at && new Date(b.due_at) < Date.now()) return 'pastdue';
+      return '';
+    }
+    return b.locked ? 'locked' : '';
+  }
+
   updateTopState() {
     const b = this.store.board; if (!b) return;
     const f = b.follow || {};
-    if (this.isTeacher) {
+    if (this.review) {
+      const p = this.store.participantsMap.get(this.store.scopeId) || {};
+      const online = p.last_seen && Date.now() - Date.parse(p.last_seen) < 75000;
+      this.elStudentTag.className = 'tag' + (p.submitted_at ? '' : ' warn');
+      this.elStudentTag.textContent = p.submitted_at ? `Submitted ${fmtWhen(p.submitted_at)}` : (online ? 'Working now' : 'Not submitted');
+      this.btnScore.querySelector('.lbl').textContent = p.score ? `Score ${p.score}` : 'Score and comment';
+    } else if (this.copy) {
+      const me = this.store.me || {}, why = this.lockReason();
+      const names = { submitted: 'Submitted', locked: 'Writing is locked', pastdue: 'Past due', notstarted: 'Not open yet' };
+      this.elLockTag.hidden = !why;
+      this.elLockTag.replaceChildren(iconEl('lock', 16), h('span', { class: 'lbl' }, names[why] || ''));
+      this.elDueTag.hidden = !b.due_at;
+      if (b.due_at) { const late = new Date(b.due_at) < Date.now(); this.elDueTag.className = 'tag' + (late ? ' warn' : ''); this.elDueTag.textContent = `Due ${fmtWhen(b.due_at)}`; }
+      this.elScoreTag.hidden = !me.score; if (me.score) this.elScoreTag.textContent = `Score ${me.score}`;
+      this.btnFeedback.hidden = !me.comment;
+      this.btnSubmit.hidden = !!(why === 'submitted' || why === 'pastdue' || why === 'notstarted');
+    } else if (this.isTeacher) {
       this.btnFollow.setAttribute('aria-pressed', String(!!f.on)); this.btnFollow.classList.toggle('on', !!f.on);
       this.btnFollow.querySelector('.lbl').textContent = f.on ? 'Following: ON' : 'Follow me';
       this.btnLock.setAttribute('aria-pressed', String(b.locked)); this.btnLock.classList.toggle('on', b.locked);
@@ -139,6 +202,73 @@ export class BoardView {
     }
   }
 
+  // ---- assignment: student side
+  async submitWork() {
+    const ok = await confirmDialog({ title: 'Submit your work?', text: 'After you submit, you cannot change your answers. Your teacher will check your work.', confirmLabel: 'Yes, submit' });
+    if (!ok) return;
+    for (let i = 0; i < 40 && this.store.dirty.size; i++) await new Promise(r => setTimeout(r, 250));
+    if (this.store.dirty.size) return toast('Your work is still saving. Wait a moment and try again.', 'bad');
+    const { data, error } = await this.sb.rpc('submit_work', { p_participant: this.store.participantId });
+    if (error) return toast(friendlyError(error), 'bad');
+    this.store.me = { ...(this.store.me || {}), submitted_at: data };
+    this.commitEditor(); this.setTool('move'); this.renderRail(); this.renderOpts(); this.updateTopState();
+    toast('Submitted. Your teacher will check your work.', 'ok');
+  }
+
+  onMe() {
+    const me = this.store.me || {}, prev = this.prevMe || {};
+    if (this.prevMe && ((me.score && me.score !== prev.score) || (me.comment && me.comment !== prev.comment))) toast('Your teacher added feedback.', 'ok');
+    this.prevMe = { score: me.score, comment: me.comment };
+    this.renderRail(); this.renderOpts(); this.updateTopState();
+  }
+
+  tickLock() {
+    const why = this.lockReason();
+    if (why !== this.lastLock) { this.lastLock = why; if (why && this.tool !== 'move') this.setTool('move'); this.renderRail(); this.renderOpts(); this.updateTopState(); }
+    else this.updateTopState();
+  }
+
+  feedbackDialog() {
+    const me = this.store.me || {};
+    modal({ title: 'Feedback from your teacher', body: h('div', null, me.score ? h('p', { style: { fontSize: '26px', fontWeight: '600', marginBottom: '10px' } }, `Score: ${me.score}`) : null, h('p', { style: { whiteSpace: 'pre-wrap', fontSize: '17px' } }, me.comment || ''), h('p', { class: 'hint', style: { marginTop: '12px' } }, 'Look for your teacher\'s writing, ticks and stamps on the pages too.')) });
+  }
+
+  // ---- assignment: teacher side (one student's copy)
+  scoreDialog() {
+    const id = this.store.scopeId, p = this.store.participantsMap.get(id) || {};
+    const score = h('input', { class: 'input', id: 'sc', value: p.score || '', maxlength: '24', placeholder: 'Example: 18/20 or A' });
+    const comment = h('textarea', { class: 'input', id: 'cm', rows: '5', maxlength: '1500', placeholder: 'Write a short comment for the student' }); comment.value = p.comment || '';
+    const err = h('p', { class: 'error', role: 'alert' });
+    const patch = async (obj, msg) => {
+      const { error } = await this.sb.from('participants').update(obj).eq('id', id);
+      if (error) { err.textContent = friendlyError(error); return false; }
+      Object.assign(p, obj); this.store.participantsMap.set(id, p); this.store.emit('participants'); this.updateTopState(); if (msg) toast(msg, 'ok'); return true;
+    };
+    const extra = [];
+    if (p.submitted_at) extra.push(h('button', { class: 'btn sm', onclick: async () => { if (await patch({ submitted_at: null }, `${p.name} can edit again.`)) m.close(); } }, 'Let student edit again (undo Submit)'));
+    extra.push(h('button', { class: 'btn sm danger', onclick: async () => {
+      m.close();
+      const ok = await confirmDialog({ title: `Delete ${p.name}?`, text: `${p.name} and all of their writing and your feedback on their copy will be deleted. This cannot be undone.`, confirmLabel: 'Delete student', danger: true });
+      if (!ok) return;
+      const { error } = await this.sb.from('participants').delete().eq('id', id);
+      if (error) return toast(friendlyError(error), 'bad');
+      this.store.participantsMap.delete(id); this.store.emit('participants'); toast(`${p.name} was deleted.`, 'ok');
+      if (this.studentNav) this.studentNav.back();
+    } }, 'Delete this student and their work'));
+    extra.push(h('button', { class: 'btn sm', onclick: async () => { await patch({ reclaim_ok: true }, `${p.name} can open this copy from another device once.`); } }, 'Allow this student to rejoin from another device'));
+    const m = modal({
+      title: `Score: ${p.name || 'student'}`,
+      body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'sc' }, 'Score'), score), h('div', { class: 'field' }, h('label', { for: 'cm' }, 'Comment'), comment), err,
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-start' } }, extra)),
+      actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => { if (await patch({ score: score.value.trim() || null, comment: comment.value.trim() || null }, 'Saved. The student can see it.')) m.close(); } }, 'Save')],
+    });
+  }
+
+  exportThis() {
+    const p = this.store.participantsMap.get(this.store.scopeId); if (!p) return;
+    exportDialog({ sb: this.sb, store: this.store, students: [p], renderer: this.renderer, label: p.name });
+  }
+
   renderStatus(s) {
     if (!this.elStatus) return;
     this.elStatus.className = 'status ' + (s === 'saving' ? 'saving' : s === 'offline' ? 'offline' : '');
@@ -147,13 +277,17 @@ export class BoardView {
   renderStatusTime() { /* reserved */ }
 
   // ----------------------------------------------------------------- tools rail
-  get locked() { return !this.isTeacher && !!(this.store.board && this.store.board.locked); }
-  toolAllowed(t) { if (t === 'laser') return this.isTeacher; return t === 'move' || !this.locked; }
+  get locked() { return !this.isTeacher && !!this.lockReason(); }
+  toolAllowed(t) {
+    if (t === 'laser') return this.isTeacher && !this.assign;
+    if (t === 'stamp') return this.review;
+    return t === 'move' || !this.locked;
+  }
 
   renderRail() {
     const items = [];
     for (const [id, label, ic] of TOOLS) {
-      if (id === 'laser' && !this.isTeacher) continue;
+      if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.review)) continue;
       const dis = !this.toolAllowed(id);
       items.push(h('button', { class: 'tool', 'aria-pressed': String(this.tool === id), disabled: dis, 'data-tool': id, title: label, onclick: () => this.setTool(id) }, iconEl(ic), label));
       if (id === 'move' || id === 'text' || id === 'ellipse') items.push(h('span', { class: 'rule' }));
@@ -177,8 +311,16 @@ export class BoardView {
       h('button', { class: 'ib', onclick: () => this.doRedo(), 'aria-label': 'Redo', title: 'Redo', disabled: !this.redoStack.length }, iconEl('redo'))));
     kids.push(h('span', { class: 'sep' }));
     const colored = t === 'pen' || t === 'highlighter' || t === 'text' || SHAPES.has(t);
-    if (colored) {
-      const pal = t === 'highlighter' ? HL_COLORS : PEN_COLORS, cur = t === 'highlighter' ? this.hlColor : this.color;
+    if (t === 'stamp') {
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Stamp' }, STAMPS.map(([k, name]) =>
+        h('button', { class: 'stampbtn', 'aria-label': name, title: name, 'aria-pressed': String(this.stampKind === k), onclick: () => { this.stampKind = k; this.renderOpts(); } }, this.stampPreview(k)))));
+      kids.push(h('span', { class: 'sep' }));
+      const names = ['Small', 'Medium', 'Large'], px = [6, 12, 20];
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, [0, 1, 2].map(i =>
+        h('button', { class: 'sz', 'aria-label': names[i], title: names[i], 'aria-pressed': String(this.sizeIdx === i), onclick: () => { this.sizeIdx = i; this.renderOpts(); } }, h('i', { style: { width: px[i] + 'px', height: px[i] + 'px' } })))));
+      kids.push(h('span', { class: 'note' }, 'Tap the page to place the stamp.'));
+    } else if (colored) {
+      const pal = t === 'highlighter' ? HL_COLORS : (this.copy ? STUDENT_ASSIGN_COLORS : PEN_COLORS), cur = t === 'highlighter' ? this.hlColor : this.color;
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Colour' }, pal.map(([name, hex]) =>
         h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(cur === hex), onclick: () => { if (t === 'highlighter') this.hlColor = hex; else this.color = hex; this.applyEditorStyle(); this.renderOpts(); } }))));
       kids.push(h('span', { class: 'sep' }));
@@ -218,6 +360,21 @@ export class BoardView {
 
   updatePager() { if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText(); }
 
+  stampPreview(k) {
+    const c = document.createElement('canvas'); c.width = 96; c.height = 56; c.style.width = '48px'; c.style.height = '28px';
+    const ctx = c.getContext('2d'); ctx.scale(2, 2);
+    drawObject(ctx, { type: 'stamp', data: { k, x: 24, y: 14, s: k === 'good' || k === 'try' ? 17 : 24 } });
+    return c;
+  }
+
+  placeStamp(p) {
+    if (!this.review) return;
+    const o = this.store.addObject('stamp', this.pageId, { k: this.stampKind, x: Math.round(p.x), y: Math.round(p.y), s: STAMP_SIZES[this.sizeIdx] });
+    this.pushUndo({ t: 'create', id: o.id });
+    const ctx = this.cInk.getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
+    this.thumbDirty(this.pageId);
+  }
+
   pagerText() { const i = this.store.pages.findIndex(p => p.id === this.pageId); return `${i + 1} / ${this.store.pages.length}`; }
 
   // ===================================================================== pages + view
@@ -233,6 +390,7 @@ export class BoardView {
     this.q = this.wantQ(); this.sizeCanvases(); this.renderBase(); this.renderInk(); this.renderLive();
     this.updatePager();
     this.store.track({ name: this.store.name, role: this.role, page: this.store.pages.indexOf(pg) + 1 });
+    if (this.copy) this.store.setCurPage(this.store.pages.indexOf(pg) + 1);
     this.markThumbCurrent();
     this.broadcastView(true);
   }
@@ -386,7 +544,11 @@ export class BoardView {
 
   // ===================================================================== store events
   onObjects(pids, id) {
-    if (id) this.ghosts.delete(id);
+    if (id) {
+      this.ghosts.delete(id);
+      const o = this.store.objs.get(id);
+      if (this.copy && o && o.is_feedback && !o.deleted && Date.now() - this.lastFeedbackToast > 60000) { this.lastFeedbackToast = Date.now(); toast('Your teacher wrote feedback on your work.', 'ok'); }
+    }
     if (pids.includes(this.pageId)) { this.scheduleInk(); if (this.ghosts.size) this.requestLive(); }
     for (const p of pids) this.thumbDirty(p);
   }
@@ -394,7 +556,7 @@ export class BoardView {
   onBoard(first = false) {
     const b = this.store.board;
     if (!first) { this.renderRail(); this.renderOpts(); }
-    if (!this.isTeacher) {
+    if (!this.isTeacher && !this.assign) {
       const f = b.follow || {};
       if (f.on) {
         if (f.seq !== this.followSeq) { this.followSeq = f.seq; this.following = true; }
@@ -584,7 +746,8 @@ export class BoardView {
     } else if (t === 'text' && da && !da.moved) {
       if (this.skipTextOpen) { this.skipTextOpen = false; return; }
       this.openTextAt(da.p);
-    } else if (t === 'laser' && this.isTeacher && e.pointerType !== 'mouse') this.store.sendLaser({ page: this.pageId, off: true });
+    } else if (t === 'stamp' && da && !da.moved) this.placeStamp(da.p);
+    else if (t === 'laser' && this.isTeacher && e.pointerType !== 'mouse') this.store.sendLaser({ page: this.pageId, off: true });
     this.skipTextOpen = false;
   }
 
@@ -811,18 +974,7 @@ export class BoardView {
     }
   }
   async drawThumb(t) {
-    const { cv, page } = t, W = cv.width, H = cv.height;
-    let base = this.thumbBases.get(page.id + page.kind + page.h);
-    if (!base) {
-      base = document.createElement('canvas'); base.width = W; base.height = H;
-      const bc = base.getContext('2d');
-      if (page.kind === 'pdf') { const r = await renderPdfPage(this.sb, page.file_path, page.pdf_page, W); bc.drawImage(r, 0, 0, W, H); }
-      else if (page.kind === 'image') { const im = await getImage(this.sb, page.file_path); bc.fillStyle = '#fff'; bc.fillRect(0, 0, W, H); bc.drawImage(im, 0, 0, W, H); }
-      else { bc.setTransform(W / 1000, 0, 0, W / 1000, 0, 0); drawPatternBase(bc, page.kind, 1000, page.h); }
-      this.thumbBases.set(page.id + page.kind + page.h, base);
-    }
-    const ctx = cv.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(base, 0, 0);
-    ctx.setTransform(W / 1000, 0, 0, W / 1000, 0, 0); drawObjects(ctx, this.store.pageObjects(page.id));
+    await this.renderer.draw(t.cv, t.page, this.store.pageObjects(t.page.id));
     t.done = true;
   }
 

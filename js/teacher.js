@@ -4,6 +4,7 @@ import { iconEl } from './icons.js';
 import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
 import { BoardView } from './board.js';
+import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 
 export const brand = (big = false) => h('a', { class: 'brand' + (big ? ' big stack' : ''), href: BASE, 'aria-label': 'Bright EngMath' },
@@ -90,8 +91,9 @@ export class TeacherApp {
     try {
       const store = new Store(this.sb, { boardId: id, role: 'teacher', name: 'Teacher' });
       await store.load(); await store.connect();
-      this.view = new BoardView({ sb: this.sb, store, role: 'teacher', root: this.root, onExit: () => { location.hash = ''; } });
-      this.view.start();
+      const onExit = () => { location.hash = ''; };
+      if (store.mode === 'assignment') { this.view = new ReviewView({ sb: this.sb, store, root: this.root, onExit }); await this.view.start(); }
+      else { this.view = new BoardView({ sb: this.sb, store, role: 'teacher', root: this.root, onExit }); this.view.start(); }
     } catch (e) {
       console.error(e);
       this.root.replaceChildren(h('div', { class: 'entry' }, h('div', { class: 'side' }, brand(true),
@@ -156,7 +158,7 @@ export class TeacherApp {
     return h('div', { class: 'board-row' },
       h('div', null,
         h('button', { class: 'title', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title),
-        h('div', { class: 'meta' }, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })))),
+        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag' }, 'Assignment') : h('span', { class: 'tag' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })))),
       h('div', { class: 'acts' }, sw,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
         h('button', { class: 'btn sm primary', onclick: () => { location.hash = '#/board/' + b.id; } }, 'Open'),
@@ -227,6 +229,17 @@ export class TeacherApp {
     const title = h('input', { class: 'input', id: 'bt', placeholder: 'Example: Fractions worksheet 4', maxlength: '120' });
     const clsSel = h('select', { class: 'select', id: 'bc' }, h('option', { value: '' }, 'No class'), this.classes.map(c => h('option', { value: c.id, selected: c.id === this.sel }, c.name)));
     const form = sourceForm({ defaultSource: 'pdf' });
+    let mode = 'live';
+    const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
+    const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Opens at (optional)'), startIn), h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
+    const modeHint = h('span', { class: 'hint' });
+    const modeSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Type of board' });
+    const drawMode = () => {
+      modeSeg.replaceChildren(...[['live', 'Live class'], ['assignment', 'Assignment']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(mode === k), onclick: () => { mode = k; drawMode(); } }, label)));
+      dates.hidden = mode !== 'assignment';
+      modeHint.textContent = mode === 'live' ? 'Everyone writes on the same page at the same time.' : 'Every student gets a private copy. You check it, write feedback and give a score.';
+    };
+    drawMode();
     const bar = h('div', { class: 'progress', hidden: true }, h('div'));
     const msg = h('p', { class: 'hint', style: { marginTop: '8px' } });
     const err = h('p', { class: 'error', role: 'alert' });
@@ -236,6 +249,7 @@ export class TeacherApp {
       body: h('div', null,
         h('div', { class: 'field' }, h('label', { for: 'bt' }, 'Board name'), title),
         h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel),
+        h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), dates,
         form.el, bar, msg, err),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
     });
@@ -244,7 +258,9 @@ export class TeacherApp {
       if (!title.value.trim()) { err.textContent = 'Give the board a name.'; title.focus(); return; }
       go.disabled = true; bar.hidden = false;
       try {
-        const b = await createBoard(this.sb, { title: title.value.trim(), classId: clsSel.value, spec: form.spec() }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
+        const s0 = startIn.value ? new Date(startIn.value).toISOString() : null, d0 = dueIn.value ? new Date(dueIn.value).toISOString() : null;
+        if (mode === 'assignment' && s0 && d0 && new Date(d0) <= new Date(s0)) throw new Error('The due time must be after the start time.');
+        const b = await createBoard(this.sb, { title: title.value.trim(), classId: clsSel.value, spec: form.spec(), mode, startsAt: mode === 'assignment' ? s0 : null, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
         m.close(); location.hash = '#/board/' + b.id;
       } catch (e) { console.error(e); err.textContent = friendlyError(e); go.disabled = false; bar.hidden = true; }
     });

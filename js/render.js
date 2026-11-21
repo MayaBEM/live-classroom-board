@@ -4,6 +4,8 @@ export const PEN_COLORS = [
   ['Black', '#1D2127'], ['Blue', '#1F5FBF'], ['Red', '#D62F2F'], ['Green', '#1F8A4C'],
   ['Orange', '#EE7A1C'], ['Brown', '#7A4A2A'], ['Teal', '#0E8A9A'], ['Pink', '#D9488F'],
 ];
+// In an assignment, red is kept for the teacher's feedback, so students get purple instead
+export const STUDENT_ASSIGN_COLORS = PEN_COLORS.map(c => c[0] === 'Red' ? ['Purple', '#7A3FA0'] : c);
 export const HL_COLORS = [
   ['Yellow', '#FFE45C'], ['Lime', '#B8E65C'], ['Green', '#6FD39A'], ['Cyan', '#6FD8E8'],
   ['Blue', '#8DB7FF'], ['Pink', '#FF9EC4'], ['Orange', '#FFB566'], ['Grey', '#C9CFD6'],
@@ -11,6 +13,8 @@ export const HL_COLORS = [
 export const PEN_SIZES = [2.6, 4.8, 9];
 export const HL_SIZES = [14, 24, 38];
 export const TEXT_SIZES = [20, 30, 44];
+export const STAMPS = [['check', 'Tick'], ['cross', 'Cross'], ['star', 'Star'], ['good', 'Good job!'], ['try', 'Try again']];
+export const STAMP_SIZES = [60, 100, 150];
 export const FONT = "Lexend, system-ui, sans-serif";
 
 // ---------------------------------------------------------------- base pages
@@ -75,6 +79,35 @@ function strokeSmooth(ctx, p, stride) {
   ctx.stroke();
 }
 
+function stampBox(d) {
+  const w = d.k === 'good' || d.k === 'try' ? d.s * (d.k === 'good' ? 2.5 : 2.6) : d.s, hh = d.k === 'good' || d.k === 'try' ? d.s * 0.8 : d.s;
+  return { w, h: hh };
+}
+
+function drawStamp(ctx, d) {
+  const { x, y, s, k } = d;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (k === 'check') {
+    ctx.strokeStyle = '#1F8A4C'; ctx.lineWidth = s * 0.17;
+    ctx.beginPath(); ctx.moveTo(x - s * 0.42, y + s * 0.02); ctx.lineTo(x - s * 0.12, y + s * 0.34); ctx.lineTo(x + s * 0.46, y - s * 0.38); ctx.stroke();
+  } else if (k === 'cross') {
+    ctx.strokeStyle = '#D62F2F'; ctx.lineWidth = s * 0.16;
+    ctx.beginPath(); ctx.moveTo(x - s * 0.36, y - s * 0.36); ctx.lineTo(x + s * 0.36, y + s * 0.36); ctx.moveTo(x + s * 0.36, y - s * 0.36); ctx.lineTo(x - s * 0.36, y + s * 0.36); ctx.stroke();
+  } else if (k === 'star') {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const r = i % 2 ? s * 0.2 : s * 0.48, a = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+    ctx.closePath(); ctx.fillStyle = '#F5B823'; ctx.fill(); ctx.strokeStyle = '#7A4A00'; ctx.lineWidth = s * 0.05; ctx.stroke();
+  } else {
+    const label = k === 'good' ? 'Good job!' : 'Try again', col = k === 'good' ? '#1F8A4C' : '#C2570C', { w, h: hh } = stampBox(d);
+    ctx.translate(x, y); ctx.rotate(-0.09);
+    ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fillRect(-w / 2, -hh / 2, w, hh);
+    ctx.strokeStyle = col; ctx.lineWidth = s * 0.06; ctx.lineJoin = 'miter'; ctx.strokeRect(-w / 2, -hh / 2, w, hh);
+    ctx.fillStyle = col; ctx.font = `600 ${s * 0.42}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, s * 0.02);
+  }
+  ctx.restore();
+}
+
 export function drawObject(ctx, o, opts = {}) {
   const d = o.data;
   if (!d) return;
@@ -127,6 +160,7 @@ export function drawObject(ctx, o, opts = {}) {
       lines.forEach((ln, i) => ctx.fillText(ln, d.x, d.y + i * d.fs * TEXT_LH + d.fs * 0.1));
       break;
     }
+    case 'stamp': drawStamp(ctx, d); break;
     default: break;
   }
   ctx.restore();
@@ -143,6 +177,8 @@ export function bounds(o) {
   if (o.type === 'pen' || o.type === 'highlighter') {
     const stride = d.pr ? 3 : 2; x0 = y0 = Infinity; x1 = y1 = -Infinity;
     for (let i = 0; i < d.p.length; i += stride) { x0 = Math.min(x0, d.p[i]); x1 = Math.max(x1, d.p[i]); y0 = Math.min(y0, d.p[i + 1]); y1 = Math.max(y1, d.p[i + 1]); }
+  } else if (o.type === 'stamp') {
+    const b = stampBox(d); x0 = d.x - b.w / 2; x1 = d.x + b.w / 2; y0 = d.y - b.h / 2; y1 = d.y + b.h / 2;
   } else if (o.type === 'text') {
     const lines = layoutText(d.text, d.fs, d.w);
     x0 = d.x; y0 = d.y; x1 = d.x + d.w; y1 = d.y + lines.length * d.fs * TEXT_LH;
@@ -179,7 +215,7 @@ export function hit(o, x, y, r) {
       const tol = w / Math.min(rx, ry);
       return Math.abs(k - 1) <= tol;
     }
-    case 'text': return true;
+    case 'text': case 'stamp': return true;
     default: return false;
   }
 }

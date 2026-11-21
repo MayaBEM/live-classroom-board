@@ -74,10 +74,10 @@ export async function addPagesToBoard(sb, boardId, startIdx, spec, progress = ()
   return full.length;
 }
 
-export async function createBoard(sb, { title, classId, spec }, progress) {
+export async function createBoard(sb, { title, classId, spec, mode = 'live', startsAt = null, dueAt = null }, progress) {
   let board = null;
   for (let tries = 0; tries < 6 && !board; tries++) {
-    const { data, error } = await sb.from('boards').insert({ title, class_id: classId || null, code: makeCode(6) }).select().single();
+    const { data, error } = await sb.from('boards').insert({ title, class_id: classId || null, code: makeCode(6), mode, starts_at: startsAt, due_at: dueAt }).select().single();
     if (!error) board = data;
     else if (error.code !== '23505') throw error;
   }

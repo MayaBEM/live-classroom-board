@@ -12,6 +12,8 @@ const MESSAGES = {
   PIN_FORMAT: 'A PIN is 4 numbers, like 2580.',
   NAME_REQUIRED: 'Type your first name.',
   BOARD_CLOSED: 'This board is closed right now. Ask your teacher.',
+  NAME_TAKEN_ASSIGNMENT: 'Your work is saved under this name on another device. Type your 4-number PIN, or ask your teacher to let you back in.',
+  NOT_STARTED: 'This assignment is not open yet.',
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 
@@ -35,8 +37,10 @@ export async function startStudent(root, code) {
   }
   if (!info.found) return page(h('h1', null, 'Board not found'), h('p', { class: 'lead' }, 'Check the link or the code your teacher sent. Letters and numbers must match.'));
   if (!info.enabled) return page(h('h1', null, info.title), h('div', { class: 'notice' }, 'This board is closed right now. Ask your teacher to open it.'));
+  const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  if (info.mode === 'assignment' && info.starts_at && new Date(info.starts_at) > Date.now()) return page(h('h1', null, info.title), h('div', { class: 'notice' }, `This assignment opens on ${when(info.starts_at)}. Come back then.`));
 
-  const saveKey = `bem-join-${code}`;
+  const saveKey = `bem-join-${code}-${new URLSearchParams(location.search).get('slot') || ''}`;
   let saved = null; try { saved = JSON.parse(localStorage.getItem(saveKey) || 'null'); } catch (e) { /* ignore */ }
 
   const enter = async (name, pin, errBox, btn) => {
@@ -75,7 +79,8 @@ export async function startStudent(root, code) {
       h('button', { class: 'btn primary', onclick: e => enter(saved.name, '', null, e.currentTarget) }, `Continue as ${saved.name}`),
       h('button', { class: 'btn', onclick: () => { try { localStorage.removeItem(saveKey); } catch (e2) { /* ignore */ } welcome.remove(); } }, 'I am someone else'))) : null;
 
-  page(h('div', null, h('p', { class: 'hint' }, 'You are joining'), h('h1', null, info.title)), welcome, form);
+  const assignNote = info.mode === 'assignment' ? h('div', { class: 'notice', style: { marginBottom: '14px' } }, h('b', null, 'This is your own private copy.'), ' Only your teacher can see your work. Make a PIN so you can come back to it on any device.', info.due_at ? h('p', { style: { marginTop: '6px' } }, `Due ${when(info.due_at)}.`) : null) : null;
+  page(h('div', null, h('p', { class: 'hint' }, info.mode === 'assignment' ? 'Assignment' : 'You are joining'), h('h1', null, info.title)), assignNote, welcome, form);
   if (!welcome) name.focus();
 }
 

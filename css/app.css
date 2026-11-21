@@ -63,7 +63,7 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 .input.big { min-height: 60px; font-size: 24px; }
 .error { color: var(--bad); font-weight: 500; font-size: 15px; min-height: 1.4em; }
 .seg { display: flex; border: 2px solid var(--ink); }
-.seg button { flex: 1; min-height: 44px; border: 0; border-right: 2px solid var(--ink); background: #fff; padding: 0 8px; font-weight: 500; }
+.seg button { white-space: nowrap; flex: 1; min-height: 44px; border: 0; border-right: 2px solid var(--ink); background: #fff; padding: 0 8px; font-weight: 500; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--orange); }
 .switch { display: inline-flex; align-items: center; gap: 10px; border: 0; background: none; padding: 0; min-height: var(--tap); font-weight: 500; }
@@ -234,12 +234,42 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 
 @media (max-width: 1180px) { .b-top .btn { padding: 0 10px; } .b-top .lbl-opt { display: none; } }
 
+/* ---------- assignment review ---------- */
+.stampbtn { width: 60px; height: 40px; border: 2px solid var(--ink); background: #fff; display: grid; place-items: center; padding: 0; flex: none; }
+.stampbtn[aria-pressed="true"] { background: var(--orange); }
+.rv-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; flex: 1; }
+.rv-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 18px; }
+.rv-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.rv.dash .dash-top { align-items: center; flex-wrap: wrap; row-gap: 8px; }
+.rv-main { display: grid; gap: 16px; align-content: start; }
+.rv-sum { display: flex; gap: 0; flex-wrap: wrap; border: 2px solid var(--ink); background: var(--paper); width: fit-content; max-width: 100%; }
+.rv-stat { padding: 8px 20px; border-right: 2px solid var(--line); display: grid; }
+.rv-stat:last-child { border-right: 0; }
+.rv-stat b { font-size: 26px; line-height: 1.1; }
+.rv-stat span { font-size: 13px; color: var(--ink-2); }
+.rv-tools { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.rv-sel { display: flex; gap: 10px; align-items: center; font-weight: 500; }
+.rv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.rv-card { text-align: left; border: 2px solid var(--ink); background: var(--paper); padding: 0; display: grid; align-content: start; }
+.rv-card:hover { background: #fff; border-color: var(--orange-deep); }
+.rv-card.ghost { border-style: dashed; border-color: var(--line); padding: 12px; background: transparent; cursor: default; }
+.rv-name { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 2px solid var(--line); font-size: 16px; }
+.rv-state { font-size: 12px; font-weight: 600; padding: 2px 8px; border: 2px solid var(--line); color: var(--ink-2); white-space: nowrap; }
+.rv-state.on { border-color: var(--ok); color: var(--ok); }
+.rv-state.sub { background: var(--ink); border-color: var(--ink); color: #fff; }
+.rv-thumb { background: var(--desk); padding: 8px; }
+.rv-thumb canvas { width: 100%; height: auto; display: block; background: #fff; border: 1px solid var(--ink-2); }
+.rv-foot { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; min-height: 40px; }
+
 /* narrow: toolbar moves to the bottom */
 @media (max-width: 719px) {
+  .b-top { flex-wrap: wrap; overflow: visible; row-gap: 6px; }
+  .b-top .grow { flex-basis: 0; }
+  .b-top .tag { font-size: 13px; min-height: 30px; }
   .only-wide { display: none !important; }
   .only-narrow { display: flex; }
   .b-top .lbl { display: none; }
-  .b-top .tag .lbl.short, .b-top .btn.primary .lbl { display: inline; }
+  .b-top .tag .lbl.short, .b-top .btn.primary .lbl, .b-top .tag .lbl:not(.long):not(.short) { display: inline; }
   .b-top .tag .lbl.long { display: none; }
   .b-top .btn { padding: 0 10px; }
   .b-top .title { max-width: 34vw; font-size: 15px; }
