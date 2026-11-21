@@ -24,6 +24,7 @@ export function h(tag, attrs, ...kids) {
 export const BASE = new URL('../', import.meta.url).href;
 export const asset = p => BASE + p;
 export const joinUrl = code => `${BASE}#/join/${code}`;
+export const classUrl = code => `${BASE}#/class/${code}`;
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
@@ -125,5 +126,14 @@ export function shareMessage({ title, link, teacher = 'Maya', name = null, code 
   if (name && code) L.push(`2. Tap your name: ${name}`, `3. Type your code: ${code}`);
   else L.push('2. Tap your name', '3. Type your 4-number code from your teacher');
   L.push('4. Start writing!', '--------------------------', `From Teacher ${teacher}`);
+  return L.join('\n');
+}
+
+// the one message for a whole class: the class link shows every board that belongs to the student
+export function classShareMessage({ name, link, teacher = 'Maya', student = null, code = null }) {
+  const L = ['BRIGHT ENGMATH', name, '--------------------------', '1. Open your class page:', link, ''];
+  if (student && code) L.push(`2. Tap your name: ${student}`, `3. Type your code: ${code}`);
+  else L.push('2. Tap your name', '3. Type your 4-number code from your teacher');
+  L.push('4. Pick the board you want to open', '--------------------------', `From Teacher ${teacher}`);
   return L.join('\n');
 }

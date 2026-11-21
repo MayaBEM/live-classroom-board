@@ -1,5 +1,5 @@
 // "Send to your students": a card with the link, and one-tap messages (one for the whole class, one per student with their own code).
-import { h, modal, toast, copyText, joinUrl, shareMessage, asset } from './util.js';
+import { h, modal, toast, copyText, joinUrl, classUrl, shareMessage, classShareMessage, asset } from './util.js';
 import { iconEl } from './icons.js';
 import { friendlyError } from './db.js';
 import { CONFIG } from '../config.js';
@@ -8,10 +8,12 @@ const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
 
 export async function shareDialog({ sb, store }) {
   const b = store.board, link = joinUrl(b.code), teacher = CONFIG.TEACHER_NAME || 'Teacher';
-  let roster = [];
+  let roster = [], cls = null;
   if (b.class_id) {
     const { data } = await sb.from('class_students').select('first_name,code').eq('class_id', b.class_id).order('first_name');
     roster = (data || []).filter(r => r.code);
+    const c = await sb.from('classes').select('name,code').eq('id', b.class_id).maybeSingle();
+    cls = c.data;
   }
   const copy = async (text, ok) => toast((await copyText(text)) ? ok : 'Could not copy. Select the text and press Ctrl+C.', 'ok');
 
@@ -33,7 +35,12 @@ export async function shareDialog({ sb, store }) {
     toast(val ? 'Link is on.' : 'Link is off. Students inside are disconnected.');
   });
 
-  const parts = [card,
+  const classBox = cls && cls.code ? h('div', { class: 'notice yellow', style: { marginBottom: '14px' } },
+    h('b', null, 'Easier for students: send the class page once. '), 'They tap their name, type their code, and see every board of this class, including this one.',
+    h('div', { class: 'share-actions', style: { marginTop: '10px' } },
+      h('button', { class: 'btn sm primary', onclick: () => copy(classShareMessage({ name: cls.name, link: classUrl(cls.code), teacher }), 'Class message copied.') }, iconEl('copy', 16), 'Copy class message'),
+      h('button', { class: 'btn sm', onclick: () => copy(classUrl(cls.code), 'Class link copied.') }, 'Copy class link'))) : null;
+  const parts = [classBox, card,
     h('div', { class: 'share-actions' },
       h('button', { class: 'btn primary', onclick: () => copy(shareMessage({ title: b.title, link, teacher }), 'Message copied. Paste it into LINE, Zoom or Meet.') }, iconEl('copy', 18), 'Copy message for the class'),
       h('button', { class: 'btn', onclick: () => copy(link, 'Link copied.') }, iconEl('link', 18), 'Copy link only'))];
@@ -50,5 +57,5 @@ export async function shareDialog({ sb, store }) {
       h('p', { class: 'hint', style: { marginTop: '10px' } }, `Without a student list, students type their first name. Class code: ${b.code}`));
   }
   parts.push(h('div', { style: { marginTop: '16px' } }, sw));
-  modal({ title: 'Send to your students', body: h('div', null, ...parts), wide: true });
+  modal({ title: 'Send to your students', body: h('div', null, ...parts.filter(Boolean)), wide: true });
 }

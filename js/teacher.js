@@ -1,5 +1,6 @@
 // Teacher side: sign-in, dashboard (classes + boards), opening a board.
-import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE, makeCodes } from './util.js';
+import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, classUrl, classShareMessage, BASE, makeCodes, makeCode } from './util.js';
+import { CONFIG } from '../config.js';
 import { iconEl } from './icons.js';
 import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
@@ -135,11 +136,25 @@ export class TeacherApp {
 
     const main = h('main', { class: 'dash-main' });
     const cls = this.classes.find(c => c.id === this.sel);
-    if (cls) main.append(this.classPanel(cls));
     const list = this.boards.filter(b => this.sel === 'all' || b.class_id === this.sel);
-    main.append(h('section', { class: 'sheet-panel' },
-      h('header', null, h('h2', null, cls ? `Boards in ${cls.name}` : 'My boards'), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog() }, iconEl('plus', 18), 'New board')),
-      list.length ? list.map(b => this.boardRow(b)) : h('div', { class: 'empty' }, h('b', null, 'No boards here yet. '), 'A board is one lesson or one worksheet. Press New board, then upload a PDF or start with a blank page. Each board gets its own link for students.')));
+    if (!this.classes.length) {
+      main.append(h('section', { class: 'sheet-panel start' },
+        h('header', null, h('h2', null, 'Start here')),
+        h('ol', { class: 'start-steps' },
+          h('li', null, h('span', { class: 'n n1' }, '1'), h('div', null, h('b', null, 'Make a class'), h('p', { class: 'hint' }, 'One class for each group you teach, like "Grade 4 Math".'))),
+          h('li', null, h('span', { class: 'n n2' }, '2'), h('div', null, h('b', null, 'Add your students'), h('p', { class: 'hint' }, 'Type first names. Each student gets their own 4-number code.'))),
+          h('li', null, h('span', { class: 'n n3' }, '3'), h('div', null, h('b', null, 'Add boards to the class'), h('p', { class: 'hint' }, 'Every student sees their own copy of each board on one class page.')))),
+        h('div', { style: { padding: '0 18px 18px' } }, h('button', { class: 'btn primary', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'Make my first class'))));
+    }
+    if (cls) {
+      main.append(this.classPanel(cls), this.classLinkPanel(cls));
+    }
+    if (this.classes.length || list.length) {
+      main.append(h('section', { class: 'sheet-panel' },
+        h('header', null, h('h2', null, cls ? 'Step 2: boards in this class' : 'All boards'), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog() }, iconEl('plus', 18), 'New board')),
+        list.length ? list.map(b => this.boardRow(b)) : h('div', { class: 'empty' }, h('b', null, 'No boards yet. '), cls && !this.students.some(s => s.class_id === cls.id) ? 'Add your students above first, then press New board.' : 'Press New board, then upload a PDF or start with a blank page. Students find it on their class page.')));
+      if (cls) { const pp = this.progressPanel(cls); if (pp) main.append(pp); }
+    }
 
     this.root.replaceChildren(h('div', { class: 'dash' },
       h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
@@ -209,7 +224,7 @@ export class TeacherApp {
     const missing = mine.filter(s => !s.code).length;
     const COL = ['c1', 'c2', 'c3', 'c4', 'c5'];
     return h('section', { class: 'sheet-panel' },
-      h('header', null, h('h2', null, `${cls.name}: students`),
+      h('header', null, h('h2', null, `Step 1: students in ${cls.name}`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
           h('button', { class: 'btn sm', onclick: () => this.renameClass(cls) }, 'Rename class'),
           h('button', { class: 'btn sm danger', onclick: () => this.deleteClassDialog(cls) }, iconEl('trash', 18), 'Delete class'))),
@@ -225,12 +240,54 @@ export class TeacherApp {
       h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
   }
 
+  classLinkPanel(cls) {
+    const link = classUrl(cls.code), teacher = CONFIG.TEACHER_NAME || 'Teacher';
+    const copy = async (text, ok) => toast((await copyText(text)) ? ok : 'Could not copy.', 'ok');
+    const mine = this.students.filter(s => s.class_id === cls.id && s.code);
+    return h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, 'Class page for your students')),
+      h('div', { class: 'class-link' },
+        h('p', null, 'Send this link ', h('b', null, 'once'), '. Students tap their name, type their code, and see all their boards. New boards appear there by themselves, so nobody gets confused.'),
+        h('div', { class: 'sc-link' }, link),
+        h('div', { class: 'share-actions' },
+          h('button', { class: 'btn primary', onclick: () => copy(classShareMessage({ name: cls.name, link, teacher }), 'Message copied. Paste it into LINE, Zoom or Meet.') }, iconEl('copy', 18), 'Copy message for the class'),
+          h('button', { class: 'btn', onclick: () => copy(link, 'Link copied.') }, iconEl('link', 18), 'Copy link only')),
+        mine.length ? h('details', { class: 'per-student' }, h('summary', null, 'Messages for each student (with their code)'),
+          h('div', { class: 'code-list' }, mine.map((s, i) => h('div', { class: 'code-row c' + (i % 5 + 1) }, h('span', { class: 'nm' }, s.first_name), h('b', { class: 'cd' }, s.code),
+            h('button', { class: 'btn sm', onclick: () => copy(classShareMessage({ name: cls.name, link, teacher, student: s.first_name, code: s.code }), `Message for ${s.first_name} copied.`) }, iconEl('copy', 16), 'Copy'))))) : null));
+  }
+
+  // who has started / sent which assignment of this class
+  progressPanel(cls) {
+    const boards = this.boards.filter(b => b.class_id === cls.id && b.mode === 'assignment').slice(0, 12).reverse();
+    const mine = this.students.filter(s => s.class_id === cls.id);
+    if (!boards.length || !mine.length) return null;
+    const host = h('div', { class: 'progress-wrap' }, h('p', { class: 'empty' }, 'Loading…'));
+    const panel = h('section', { class: 'sheet-panel' }, h('header', null, h('h2', null, 'Who has done what')), host);
+    this.sb.from('participants').select('board_id,name,submitted_at,score,comment').in('board_id', boards.map(b => b.id)).then(({ data, error }) => {
+      if (error) { host.replaceChildren(h('p', { class: 'empty' }, friendlyError(error))); return; }
+      const key = (b, n) => b + '|' + n.toLowerCase(), by = new Map((data || []).map(p => [key(p.board_id, p.name), p]));
+      const cell = (b, s) => {
+        const p = by.get(key(b.id, s.first_name));
+        let cls2 = 'new', txt = 'Not started';
+        if (p) { if (p.submitted_at && (p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent'; } else { cls2 = 'working'; txt = 'Working'; } }
+        return h('td', null, h('button', { class: 'pg-chip ' + cls2, title: `${s.first_name}: ${b.title}`, onclick: () => { location.hash = '#/board/' + b.id; } }, txt));
+      };
+      host.replaceChildren(h('div', { class: 'tbl-scroll' }, h('table', { class: 'prog' },
+        h('thead', null, h('tr', null, h('th', null, 'Student'), boards.map(b => h('th', { title: b.title }, h('button', { class: 'quiet-link', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title))))),
+        h('tbody', null, mine.map(s => h('tr', null, h('th', { scope: 'row' }, s.first_name), boards.map(b => cell(b, s))))))));
+    });
+    return panel;
+  }
+
   newClassDialog() {
     const name = h('input', { class: 'input', id: 'cn', placeholder: 'Example: Grade 4 Math, Tuesday', maxlength: '80' });
     const err = h('p', { class: 'error', role: 'alert' });
     const save = async () => {
       if (!name.value.trim()) { err.textContent = 'Give the class a name.'; return; }
-      const { data, error } = await this.sb.from('classes').insert({ name: name.value.trim() }).select().single();
+      let data = null, error = null;
+      for (let i = 0; i < 6 && !data; i++) { const r = await this.sb.from('classes').insert({ name: name.value.trim(), code: makeCode(6) }).select().single(); if (!r.error) data = r.data; else if (r.error.code !== '23505') { error = r.error; break; } }
+      if (!data && !error) error = new Error('Could not make a class code. Try again.');
       if (error) { err.textContent = friendlyError(error); return; }
       m.close(); this.sel = data.id; await this.loadAll(); this.renderDashboard();
     };
@@ -265,7 +322,11 @@ export class TeacherApp {
 
   newBoardDialog() {
     const title = h('input', { class: 'input', id: 'bt', placeholder: 'Example: Fractions worksheet 4', maxlength: '120' });
-    const clsSel = h('select', { class: 'select', id: 'bc' }, h('option', { value: '' }, 'No class'), this.classes.map(c => h('option', { value: c.id, selected: c.id === this.sel }, c.name)));
+    if (!this.classes.length) {
+      const m0 = modal({ title: 'Make a class first', body: h('p', null, 'Boards belong to a class so that every student finds their own boards on one page. Make a class and add your students first, then add boards.'), actions: [h('button', { class: 'btn', onclick: () => m0.close() }, 'Close'), h('button', { class: 'btn primary', onclick: () => { m0.close(); this.newClassDialog(); } }, 'Make a class')] });
+      return;
+    }
+    const clsSel = h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
     const form = sourceForm({ defaultSource: 'pdf' });
     let mode = 'live';
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });

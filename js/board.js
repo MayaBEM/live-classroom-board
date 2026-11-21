@@ -24,8 +24,8 @@ const MIN_S = 0.12, MAX_S = 8;
 
 export class BoardView {
   // embedded: the review screen owns the store; studentNav: { name, index, count, prev(), next(), back() } for a teacher looking at one student's copy
-  constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null }) {
-    Object.assign(this, { sb, store, role, root, onExit, code, embedded, studentNav });
+  constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null, onBack = null }) {
+    Object.assign(this, { sb, store, role, root, onExit, code, embedded, studentNav, onBack });
     this.isTeacher = role === 'teacher';
     this.assign = store.mode === 'assignment';
     this.review = this.isTeacher && this.assign;        // teacher looking at one student's copy
@@ -145,11 +145,13 @@ export class BoardView {
       this.elScoreTag = h('span', { class: 'tag', hidden: true });
       this.btnFeedback = h('button', { class: 'tbtn', hidden: true, title: 'Teacher comment', 'aria-label': 'Teacher comment', onclick: () => this.feedbackDialog() }, iconEl('file', 22));
       this.btnSubmit = h('button', { class: 'btn primary sm', onclick: () => this.submitWork() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Submit'));
+      if (this.onBack) L.push(tb('back', 'My boards', () => this.exitBoard()));
       L.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus);
       Rt.push(this.elDueTag, this.elScoreTag, this.btnFeedback, this.elLockTag, this.btnSubmit, this.btnPages);
     } else {
       this.elLockTag.append(iconEl('lock', 16), h('span', { class: 'lbl long' }, 'Writing is locked'), h('span', { class: 'lbl short' }, 'Locked'));
       if (this.isTeacher) L.push(tb('back', 'Back to my boards', () => this.onExit()));
+      else if (this.onBack) L.push(tb('back', 'My boards', () => this.exitBoard()));
       L.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus);
       Rt.push(this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
       if (this.isTeacher) {
@@ -168,6 +170,8 @@ export class BoardView {
     this.renderStatus(st.sync);
     this.updateTopState();
   }
+
+  exitBoard() { this.destroy(); if (this.onBack) this.onBack(); }
 
   // why a student cannot write right now ('' = can write)
   lockReason() {
