@@ -587,3 +587,7 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
   .b-top .title { min-width: 40px; }
 }
 .tb-left .title { flex: 0 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.zoom-pct { min-width: 54px; height: 38px; border: 0; background: transparent; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 0 4px; font-variant-numeric: tabular-nums; }
+.zoom-pct:hover { background: #EBE7DB; color: var(--ink); }
+.sheet canvas { touch-action: none; }

@@ -123,10 +123,13 @@ export function drawObject(ctx, o, opts = {}) {
       if (o.type === 'highlighter') ctx.globalAlpha = (opts.alpha || 1) * 0.4;
       if (n === 1) { ctx.beginPath(); ctx.arc(p[0], p[1], d.s / 2, 0, Math.PI * 2); ctx.fill(); break; }
       if (!d.pr || o.type === 'highlighter') { ctx.lineWidth = d.s; strokeSmooth(ctx, p, stride); break; }
-      for (let i = 1; i < n; i++) {
-        const pr = (p[(i - 1) * 3 + 2] + p[i * 3 + 2]) / 2;
-        ctx.lineWidth = d.s * (0.35 + 1.1 * pr);
-        ctx.beginPath(); ctx.moveTo(p[(i - 1) * 3], p[(i - 1) * 3 + 1]); ctx.lineTo(p[i * 3], p[i * 3 + 1]); ctx.stroke();
+      {
+        let sx = p[0], sy = p[1];
+        for (let i = 1; i < n; i++) {
+          const last = i === n - 1, ex = last ? p[i * 3] : (p[i * 3] + p[(i + 1) * 3]) / 2, ey = last ? p[i * 3 + 1] : (p[i * 3 + 1] + p[(i + 1) * 3 + 1]) / 2;
+          ctx.lineWidth = d.s * (0.35 + 1.1 * ((p[(i - 1) * 3 + 2] + p[i * 3 + 2]) / 2));
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(p[i * 3], p[i * 3 + 1], ex, ey); ctx.stroke(); sx = ex; sy = ey;
+        }
       }
       break;
     }
@@ -233,4 +236,44 @@ export function simplify(pts, stride, minDist) {
   const e = pts.length - stride;
   out.push(pts[e], pts[e + 1]); if (stride === 3) out.push(pts[e + 2]);
   return out;
+}
+
+
+// ---------------------------------------------------------------- live ink (drawn while the pen is still moving)
+// strokeInc draws the finished part of the stroke (up to the midpoint before the last point) and returns where to continue.
+// strokeTip draws the small last piece (plus predicted points) on a canvas that is cleared every frame.
+function strokeStyleFor(ctx, o) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = o.data.c; ctx.fillStyle = o.data.c; ctx.lineWidth = o.data.s;
+}
+export function strokeInc(ctx, o, i0) {
+  const d = o.data, st = d.pr ? 3 : 2, p = d.p, n = p.length / st, hl = o.type === 'highlighter';
+  if (n < 3 || i0 > n - 2) return Math.max(i0, 1);
+  ctx.save(); strokeStyleFor(ctx, o);
+  let sx = i0 === 1 ? p[0] : (p[(i0 - 1) * st] + p[i0 * st]) / 2, sy = i0 === 1 ? p[1] : (p[(i0 - 1) * st + 1] + p[i0 * st + 1]) / 2;
+  if (!d.pr || hl) {
+    ctx.beginPath(); ctx.moveTo(sx, sy);
+    for (let i = i0; i <= n - 2; i++) ctx.quadraticCurveTo(p[i * st], p[i * st + 1], (p[i * st] + p[(i + 1) * st]) / 2, (p[i * st + 1] + p[(i + 1) * st + 1]) / 2);
+    ctx.stroke();
+  } else {
+    for (let i = i0; i <= n - 2; i++) {
+      const ex = (p[i * 3] + p[(i + 1) * 3]) / 2, ey = (p[i * 3 + 1] + p[(i + 1) * 3 + 1]) / 2;
+      ctx.lineWidth = d.s * (0.35 + 1.1 * ((p[(i - 1) * 3 + 2] + p[i * 3 + 2]) / 2));
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(p[i * 3], p[i * 3 + 1], ex, ey); ctx.stroke(); sx = ex; sy = ey;
+    }
+  }
+  ctx.restore();
+  return n - 1;
+}
+export function strokeTip(ctx, o, pred) {
+  const d = o.data, st = d.pr ? 3 : 2, p = d.p, n = p.length / st;
+  if (!n) return;
+  ctx.save(); strokeStyleFor(ctx, o);
+  if (o.type === 'highlighter') ctx.globalAlpha = 0.4;
+  if (d.pr) ctx.lineWidth = d.s * (0.35 + 1.1 * p[(n - 1) * 3 + 2]);
+  const lx = p[(n - 1) * st], ly = p[(n - 1) * st + 1];
+  if (n === 1 && !(pred && pred.length)) { ctx.beginPath(); ctx.arc(lx, ly, d.s / 2, 0, Math.PI * 2); ctx.fill(); ctx.restore(); return; }
+  const sx = n >= 3 ? (p[(n - 2) * st] + p[(n - 1) * st]) / 2 : p[0], sy = n >= 3 ? (p[(n - 2) * st + 1] + p[(n - 1) * st + 1]) / 2 : p[1];
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(lx, ly);
+  if (pred) for (const q of pred) ctx.lineTo(q.x, q.y);
+  ctx.stroke(); ctx.restore();
 }

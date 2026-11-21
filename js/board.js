@@ -1,7 +1,7 @@
 // The board screen: page view, drawing tools, live sync, follow-me, lock, laser, panels.
 import { h, uuid, clamp, debounce, throttle, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE } from './util.js';
 import { icon, iconEl } from './icons.js';
-import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText,
+import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
   PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS } from './render.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
@@ -96,10 +96,10 @@ export class BoardView {
     this.elTop = h('header', { class: 'b-top' + (this.review ? ' wide-wrap' : '') }, this.tbLeft, this.elRail, this.tbRight);
     this.elOpts = h('div', { class: 'b-pop', hidden: true });
     this.sheet = h('div', { class: 'sheet' });
-    this.cBase = h('canvas'); this.cInk = h('canvas'); this.cLive = h('canvas');
+    this.cBase = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
     this.overlay = h('div', { class: 'overlay' });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
-    this.sheet.append(this.cBase, this.cInk, this.cLive, this.overlay, this.loadingEl);
+    this.sheet.append(this.cBase, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
     this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
@@ -369,6 +369,7 @@ export class BoardView {
       h('button', { class: 'ib', onclick: () => this.zoomStep(1 / 1.25), 'aria-label': 'Zoom out', title: 'Zoom out' }, iconEl('minus', 20)),
       h('button', { class: 'ib', onclick: () => { this.fit(); }, 'aria-label': 'Fit page', title: 'Fit page' }, iconEl('fit', 20)),
       h('button', { class: 'ib', onclick: () => this.zoomStep(1.25), 'aria-label': 'Zoom in', title: 'Zoom in' }, iconEl('plus', 20)),
+      h('button', { class: 'zoom-pct', onclick: () => this.fit(), 'aria-label': 'Back to fit', title: 'Back to the whole page' }, '100%'),
       h('span', { class: 'sep' }),
       h('div', { class: 'pg-nav' },
         h('button', { class: 'ib', onclick: () => this.goPage(-1), 'aria-label': 'Previous page', title: 'Previous page' }, iconEl('left', 20)),
@@ -403,7 +404,7 @@ export class BoardView {
     const pg = this.store.pages.find(p => p.id === id); if (!pg) return;
     if (user) this.userMoved();
     this.commitEditor();
-    this.pageId = id; this.cur = null; this.ghosts.clear(); this.laserPts = [];
+    this.pageId = id; this.cur = null; this.ghosts.clear(); this.laserPts = []; this.rectCache = null; this.clearStroke();
     this.sheet.style.width = '1000px'; this.sheet.style.height = pg.h + 'px';
     if (!keepView) { this.autoFit = true; this.fitNow(false); }
     this.q = this.wantQ(); this.sizeCanvases(); this.renderBase(); this.renderInk(); this.renderLive();
@@ -438,7 +439,7 @@ export class BoardView {
 
   placePop() { if (this.elOpts && this.elTop) this.elOpts.style.top = (this.elTop.offsetHeight + 10) + 'px'; }
 
-  onResize() { this.placePop(); if (this.autoFit && this.page) { this.fitNow(false); this.applyView(); } }
+  onResize() { this.rectCache = null; this.placePop(); if (this.autoFit && this.page) { this.fitNow(false); this.applyView(); } }
 
   stageSize() { return { w: this.stage.clientWidth || 800, h: this.stage.clientHeight || 600 }; }
 
@@ -457,15 +458,21 @@ export class BoardView {
   }
   fit() { this.userMoved(); this.autoFit = true; this.fitNow(); this.applyView(); }
 
+  // The page stays whole and centred: you cannot zoom out past "fit", and when it is smaller than the screen it cannot be pushed around.
+  // Zoomed in, it can only move until its edges reach the edges of the screen.
   clampView() {
     const pg = this.page; if (!pg) return;
-    const { w, h } = this.stageSize(), v = this.view, keep = 90;
-    v.s = clamp(v.s, MIN_S, MAX_S);
-    v.tx = clamp(v.tx, keep - 1000 * v.s, w - keep);
-    v.ty = clamp(v.ty, keep - pg.h * v.s, h - keep);
+    const { w, h } = this.stageSize(), v = this.view, top = this.insetTop(), pad = 12, fit = this.fitScale();
+    v.s = clamp(v.s, fit, Math.max(fit, MAX_S));
+    const pw = 1000 * v.s, ph = pg.h * v.s, availH = h - top;
+    v.tx = pw <= w - 2 * pad + 1 ? (w - pw) / 2 : clamp(v.tx, w - pw - pad, pad);
+    v.ty = ph <= availH - pad + 1 ? top + (availH - ph) / 2 : clamp(v.ty, h - ph - pad, top);
+    this.zoomPct = Math.round(v.s / fit * 100);
+    if (this.el) for (const e of this.el.querySelectorAll('.zoom-pct')) e.textContent = this.zoomPct + '%';
   }
 
   applyView(fromRemote = false) {
+    this.rectCache = null;
     this.clampView();
     const v = this.view;
     this.sheet.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.s})`;
@@ -498,7 +505,8 @@ export class BoardView {
   sizeCanvases() {
     const pg = this.page; if (!pg) return;
     const W = Math.round(1000 * this.q), H = Math.round(pg.h * this.q);
-    for (const c of [this.cBase, this.cInk, this.cLive]) { c.width = W; c.height = H; }
+    for (const c of [this.cBase, this.cInk, this.cStroke, this.cLive]) { c.width = W; c.height = H; }
+    this.strokeIdx = 1;
   }
 
   async loadPageMm(pg) {
@@ -560,8 +568,16 @@ export class BoardView {
 
   requestLive() { if (this.liveQueued) return; this.liveQueued = true; requestAnimationFrame(() => { this.liveQueued = false; this.renderLive(); }); }
 
+  // low-latency 2D contexts (where the browser supports it) for the stroke that is being drawn right now
+  liveCtx() { if (!this._lctx) { try { this._lctx = this.cLive.getContext('2d', { desynchronized: true }); } catch (e) { this._lctx = this.cLive.getContext('2d'); } } return this._lctx; }
+  strokeCtx() { if (!this._sctx) { try { this._sctx = this.cStroke.getContext('2d', { desynchronized: true }); } catch (e) { this._sctx = this.cStroke.getContext('2d'); } } return this._sctx; }
+  clearStroke() {
+    const sc = this.strokeCtx(); sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, this.cStroke.width, this.cStroke.height);
+    this.strokeIdx = 1; this.strokeDirty = false; this.pred = null; this.cStroke.style.opacity = '';
+  }
+
   renderLive() {
-    const c = this.cLive, ctx = c.getContext('2d'), q = this.q, now = performance.now();
+    const c = this.cLive, ctx = this.liveCtx(), q = this.q, now = performance.now();
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
     if (!this.pageId) return;
     ctx.setTransform(q, 0, 0, q, 0, 0);
@@ -571,7 +587,15 @@ export class BoardView {
       if (g.page_id === this.pageId) { drawObject(ctx, g); again = again || now - g.t < 6000; }
     }
     if (this.ghosts.size) again = true;
-    if (this.cur) drawObject(ctx, this.cur);
+    if (this.cur) {
+      if (this.cur.type === 'pen' || this.cur.type === 'highlighter') {
+        // the finished part goes onto the stroke canvas once; only the tip is redrawn each frame
+        const sc = this.strokeCtx(); sc.setTransform(q, 0, 0, q, 0, 0);
+        this.cStroke.style.opacity = this.cur.type === 'highlighter' ? '0.4' : '';
+        this.strokeIdx = strokeInc(sc, this.cur, this.strokeIdx); this.strokeDirty = true;
+        strokeTip(ctx, this.cur, this.pred);
+      } else drawObject(ctx, this.cur);
+    } else if (this.strokeDirty) this.clearStroke();
     // laser
     this.laserPts = this.laserPts.filter(p => now - p.t < 900);
     if (this.laserPts.length) {
@@ -701,7 +725,7 @@ export class BoardView {
 
   // ===================================================================== pointer handling
   toPage(e) {
-    const r = this.sheet.getBoundingClientRect(), k = 1000 / r.width;
+    const r = this.rectCache || (this.rectCache = this.sheet.getBoundingClientRect()), k = 1000 / r.width;
     return { x: (e.clientX - r.left) * k, y: (e.clientY - r.top) * k };
   }
   stagePt(e) { const r = this.stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
@@ -716,14 +740,16 @@ export class BoardView {
     if (this.editor) { const wasText = this.tool === 'text'; this.commitEditor(); if (wasText) this.skipTextOpen = true; }
     if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); return; }
     this.suppress = false;
-    const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (e.pointerType === 'touch' && this.penSeen) || (!this.toolAllowed(this.tool));
+    // a finger or palm resting on the screen while writing with a pencil does nothing (two fingers still zoom)
+    if (e.pointerType === 'touch' && this.penSeen && this.tool !== 'move') { this.suppress = true; return; }
+    const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (!this.toolAllowed(this.tool));
     if (panning) { this.startPan(e); return; }
     const p = this.toPage(e); this.downAt = { x: e.clientX, y: e.clientY, p, moved: false };
     const t = this.tool;
     if (t === 'pen' || t === 'highlighter') {
       const pr = e.pointerType === 'pen' && t === 'pen';
       const data = { c: t === 'pen' ? this.color : this.hlColor, s: (t === 'pen' ? PEN_SIZES : HL_SIZES)[this.sizeIdx], pr: pr ? 1 : 0, p: pr ? [p.x, p.y, e.pressure || 0.5] : [p.x, p.y] };
-      this.cur = { id: uuid(), type: t, page_id: this.pageId, data, deleted: false }; this.sentTo = 0;
+      this.clearStroke(); this.cur = { id: uuid(), type: t, page_id: this.pageId, data, deleted: false }; this.sentTo = 0;
       this.sendCur(); this.requestLive();
     } else if (SHAPES.has(t)) {
       this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
@@ -754,6 +780,8 @@ export class BoardView {
         if (n >= stride && Math.hypot(p.x - d.p[n - stride], p.y - d.p[n - stride + 1]) < 0.5 / Math.max(.3, this.view.s * 1.2)) continue;
         d.p.push(p.x, p.y); if (stride === 3) d.p.push(ev.pressure || 0.5);
       }
+      const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];
+      this.pred = pe.length ? pe.slice(0, 3).map(ev => this.toPage(ev)) : null;
       this.sendCurT(); this.requestLive();
     } else if (this.cur && SHAPES.has(t)) {
       const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;
@@ -769,7 +797,7 @@ export class BoardView {
     try { this.stage.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     if (!had) return;
     if (this.g) {
-      if (this.pointers.size < 2) { this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem) this.startPanFrom(rem); }
+      if (this.pointers.size < 2) { this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem && this.tool === 'move') this.startPanFrom(rem); }
       return;
     }
     if (this.pan) {
@@ -779,10 +807,10 @@ export class BoardView {
     }
     if (this.suppress) { if (!this.pointers.size) this.suppress = false; return; }
     const t = this.tool, da = this.downAt; this.downAt = null;
-    if (cancelled) { this.cur = null; this.requestLive(); return; }
+    if (cancelled) { this.cur = null; this.clearStroke(); this.requestLive(); return; }
     if (this.cur && (t === 'pen' || t === 'highlighter')) {
       const d = this.cur.data, stride = d.pr ? 3 : 2;
-      d.p = simplify(d.p, stride, 0.7).map(v => Math.round(v * 10) / 10);
+      d.p = simplify(d.p, stride, 0.3).map(v => Math.round(v * 20) / 20);
       this.finishCur();
     } else if (this.cur && SHAPES.has(t)) {
       const d = this.cur.data;
@@ -799,7 +827,7 @@ export class BoardView {
     this.skipTextOpen = false;
   }
 
-  cancelCurrent() { this.cur = null; this.downAt = null; this.eraseIds = null; this.requestLive(); }
+  cancelCurrent() { this.cur = null; this.downAt = null; this.eraseIds = null; this.clearStroke(); this.requestLive(); }
 
   finishCur() {
     const c = this.cur; this.cur = null;
@@ -809,6 +837,7 @@ export class BoardView {
     if (this.pageId === c.page_id) {
       const ctx = this.cInk.getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
     }
+    this.clearStroke();
     this.thumbDirty(c.page_id);
     if (!this.store.online) toast('You are offline. Your work is kept safely and will save when the internet is back.');
     this.requestLive();
@@ -968,6 +997,7 @@ export class BoardView {
 
   // ===================================================================== side panels
   togglePanel(name) {
+    this.rectCache = null;
     this.panel = this.panel === name ? null : name;
     this.el.classList.toggle('side-closed', !this.panel);
     this.elSide.classList.toggle('wide', this.panel === 'people');
