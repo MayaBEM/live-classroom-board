@@ -50,7 +50,8 @@ export class BoardView {
     const st = this.store;
     this.instr.attach(this.overlay);
     this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: this.isTeacher });
-    this.renderTop(); this.renderRail(); this.renderOpts();
+    this.renderTop(); this.renderRail(); this.renderOpts(); this.placePop();
+    this.ro2 = new ResizeObserver(() => this.placePop()); this.ro2.observe(this.elTop);
     this.unsubs = [
       st.on('objects', (pids, id) => this.onObjects(pids, id)),
       st.on('pages', () => this.onPages()),
@@ -81,7 +82,7 @@ export class BoardView {
 
   destroy() {
     document.body.classList.remove('in-board');
-    this.unsubs.forEach(u => u()); this.ro.disconnect();
+    this.unsubs.forEach(u => u()); this.ro.disconnect(); if (this.ro2) this.ro2.disconnect();
     document.removeEventListener('keydown', this.keyHandler); document.removeEventListener('keyup', this.keyUp);
     clearInterval(this.tick); clearInterval(this.lockTimer); clearInterval(this.shareTimer);
     this.instr.detach(); this.timerCtl.destroy();
@@ -90,19 +91,20 @@ export class BoardView {
   }
 
   buildUI() {
-    this.elTop = h('header', { class: 'b-top' });
-    this.elOpts = h('div', { class: 'b-opts' });
-    this.elRail = h('nav', { class: 'b-rail', 'aria-label': 'Tools' });
+    this.tbLeft = h('div', { class: 'tb-left' }); this.tbRight = h('div', { class: 'tb-right' });
+    this.elRail = h('nav', { class: 'tb-tools', 'aria-label': 'Tools' });
+    this.elTop = h('header', { class: 'b-top' + (this.review ? ' wide-wrap' : '') }, this.tbLeft, this.elRail, this.tbRight);
+    this.elOpts = h('div', { class: 'b-pop', hidden: true });
     this.sheet = h('div', { class: 'sheet' });
     this.cBase = h('canvas'); this.cInk = h('canvas'); this.cLive = h('canvas');
     this.overlay = h('div', { class: 'overlay' });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
     this.sheet.append(this.cBase, this.cInk, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
-    this.zoomPill = h('div', { class: 'zoom-pill only-narrow' });
-    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner);
+    this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
+    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
     this.elSide = h('aside', { class: 'b-side' });
-    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.elOpts, this.elRail, this.stage, this.elSide);
+    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.stage, this.elSide, this.elOpts);
     this.root.replaceChildren(this.el);
 
     const s = this.stage;
@@ -118,54 +120,51 @@ export class BoardView {
 
   // ----------------------------------------------------------------- top bar
   renderTop() {
-    const st = this.store, t = this.elTop, bits = [];
+    const st = this.store, L = [], Rt = [];
     const brand = h('span', { class: 'brand' }, h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' }));
+    const tb = (ic, label, fn, cls = '') => h('button', { class: 'tbtn ' + cls, title: label, 'aria-label': label, onclick: fn }, iconEl(ic, 22), h('span', { class: 'lbl' }, label));
     this.elStatus = h('span', { class: 'status', role: 'status' }, 'Saved');
-    const grow = () => h('span', { class: 'grow' });
     this.elFollowTag = h('span', { class: 'tag', hidden: true });
     this.elLockTag = h('span', { class: 'tag warn', hidden: true });
     this.btnBackToTeacher = h('button', { class: 'btn primary sm', hidden: true, onclick: () => this.rejoinTeacher() }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Back to teacher'));
+    this.btnPages = tb('pages', 'Pages', () => this.togglePanel('pages'));
 
     if (this.review) {
       const nav = this.studentNav;
-      bits.push(h('button', { class: 'btn quiet sm', onclick: () => nav.back(), 'aria-label': 'Back to the class overview' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Class')));
-      bits.push(brand);
-      bits.push(h('button', { class: 'ib', 'aria-label': 'Previous student', title: 'Previous student', disabled: nav.count < 2, onclick: () => nav.prev() }, iconEl('left')));
-      bits.push(h('span', { class: 'title', title: nav.name }, nav.name));
-      bits.push(h('button', { class: 'ib', 'aria-label': 'Next student', title: 'Next student', disabled: nav.count < 2, onclick: () => nav.next() }, iconEl('right')));
+      L.push(tb('back', 'Back to the class overview', () => nav.back()), brand,
+        h('button', { class: 'tbtn', 'aria-label': 'Previous student', title: 'Previous student', disabled: nav.count < 2, onclick: () => nav.prev() }, iconEl('left', 20)),
+        h('span', { class: 'title', title: nav.name }, nav.name),
+        h('button', { class: 'tbtn', 'aria-label': 'Next student', title: 'Next student', disabled: nav.count < 2, onclick: () => nav.next() }, iconEl('right', 20)),
+        this.elStatus);
       this.elStudentTag = h('span', { class: 'tag' });
-      bits.push(this.elStatus, this.elStudentTag, grow());
       this.btnScore = h('button', { class: 'btn sm primary', onclick: () => this.scoreDialog() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Score and comment'));
-      this.btnExport = h('button', { class: 'btn sm', onclick: () => this.exportThis() }, iconEl('file', 18), h('span', { class: 'lbl lbl-opt' }, 'Export PDF'));
-      bits.push(this.btnScore, this.btnExport);
+      this.btnExport = tb('file', 'Export PDF', () => this.exportThis());
+      Rt.push(this.elStudentTag, this.btnScore, this.btnExport, this.btnPages);
     } else if (this.copy) {
       this.elDueTag = h('span', { class: 'tag', hidden: true });
       this.elScoreTag = h('span', { class: 'tag', hidden: true });
-      this.btnFeedback = h('button', { class: 'btn sm', hidden: true, title: 'Teacher comment', 'aria-label': 'Teacher comment', onclick: () => this.feedbackDialog() }, iconEl('file', 18), h('span', { class: 'lbl' }, 'Teacher comment'));
+      this.btnFeedback = h('button', { class: 'tbtn', hidden: true, title: 'Teacher comment', 'aria-label': 'Teacher comment', onclick: () => this.feedbackDialog() }, iconEl('file', 22));
       this.btnSubmit = h('button', { class: 'btn primary sm', onclick: () => this.submitWork() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Submit'));
-      bits.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus, grow(), this.elDueTag, this.elScoreTag, this.btnFeedback, this.elLockTag, this.btnSubmit);
+      L.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus);
+      Rt.push(this.elDueTag, this.elScoreTag, this.btnFeedback, this.elLockTag, this.btnSubmit, this.btnPages);
     } else {
       this.elLockTag.append(iconEl('lock', 16), h('span', { class: 'lbl long' }, 'Writing is locked'), h('span', { class: 'lbl short' }, 'Locked'));
-      if (this.isTeacher) bits.push(h('button', { class: 'btn quiet sm', onclick: () => this.onExit(), 'aria-label': 'Back to my boards' }, iconEl('back', 18), h('span', { class: 'lbl lbl-opt' }, 'Boards')));
-      bits.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus, grow(), this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
+      if (this.isTeacher) L.push(tb('back', 'Back to my boards', () => this.onExit()));
+      L.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus);
+      Rt.push(this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
       if (this.isTeacher) {
-        this.btnFollow = h('button', { class: 'btn sm', onclick: () => this.toggleFollow(), 'aria-pressed': 'false', title: 'Students see the page and zoom you are looking at' }, iconEl('follow', 18), h('span', { class: 'lbl' }, 'Follow me'));
-        this.btnLock = h('button', { class: 'btn sm', onclick: () => this.toggleLock(), 'aria-pressed': 'false' }, iconEl('lock', 18), h('span', { class: 'lbl' }, 'Lock writing'));
-        this.btnClear = h('button', { class: 'btn sm', onclick: () => this.clearDialog() }, iconEl('clear', 18), h('span', { class: 'lbl lbl-opt' }, 'Clear'));
-        this.btnShare = h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'lbl lbl-opt' }, 'Share'));
-        this.btnPeople = h('button', { class: 'btn sm', onclick: () => this.togglePanel('people') }, iconEl('people', 18), h('span', { class: 'lbl' }, 'People '), h('b', { class: 'cnt' }, '0'));
-        bits.push(this.btnFollow, this.btnLock, this.btnClear, this.btnShare, this.btnPeople);
+        this.btnFollow = tb('follow', 'Follow me', () => this.toggleFollow()); this.btnFollow.setAttribute('aria-pressed', 'false'); this.btnFollow.title = 'Follow me: students see the page and zoom you are looking at';
+        this.btnLock = tb('lock', 'Lock writing', () => this.toggleLock()); this.btnLock.setAttribute('aria-pressed', 'false');
+        this.btnClear = tb('clear', 'Clear the board', () => this.clearDialog());
+        this.btnShare = tb('share', 'Share with students', () => this.shareDialog());
+        this.btnPeople = h('button', { class: 'tbtn', title: 'People', 'aria-label': 'People', onclick: () => this.togglePanel('people') }, iconEl('people', 22), h('b', { class: 'cnt' }, '0'));
+        this.btnTimer = tb('timer', 'Class timer', () => this.timerCtl.dialog());
+        Rt.push(this.btnFollow, this.btnLock, this.btnClear, h('span', { class: 'tsep' }), this.btnPeople, this.btnTimer, this.btnShare);
       }
+      Rt.push(this.btnPages);
     }
-    this.btnPages = h('button', { class: 'btn sm', onclick: () => this.togglePanel('pages') }, iconEl('pages', 18), h('span', { class: 'lbl' }, 'Pages'));
-    bits.push(this.btnPages);
-    const si = bits.indexOf(this.elStatus);
-    bits.splice(si + 1, 0, this.timerCtl.el);
-    if (this.isTeacher && !this.review) {
-      const bi = bits.indexOf(this.btnPages);
-      bits.splice(bi, 0, h('button', { class: 'btn sm', onclick: () => this.timerCtl.dialog(), title: 'Class timer' }, iconEl('timer', 18), h('span', { class: 'lbl lbl-opt' }, 'Timer')));
-    }
-    t.replaceChildren(...bits);
+    L.splice(L.indexOf(this.elStatus) + 1, 0, this.timerCtl.el);
+    this.tbLeft.replaceChildren(...L); this.tbRight.replaceChildren(...Rt);
     this.renderStatus(st.sync);
     this.updateTopState();
   }
@@ -218,7 +217,7 @@ export class BoardView {
       this.btnFollow.setAttribute('aria-pressed', String(!!f.on)); this.btnFollow.classList.toggle('on', !!f.on);
       this.btnFollow.querySelector('.lbl').textContent = f.on ? 'Following: ON' : 'Follow me';
       this.btnLock.setAttribute('aria-pressed', String(b.locked)); this.btnLock.classList.toggle('on', b.locked);
-      this.btnLock.replaceChildren(iconEl(b.locked ? 'lock' : 'unlock', 18), h('span', { class: 'lbl' }, b.locked ? 'Writing locked' : 'Lock writing'));
+      this.btnLock.replaceChildren(iconEl(b.locked ? 'lock' : 'unlock', 22), h('span', { class: 'lbl' }, b.locked ? 'Writing locked' : 'Lock writing')); this.btnLock.title = b.locked ? 'Writing is locked. Tap to let students write' : 'Lock writing';
     } else {
       this.elLockTag.hidden = !b.locked;
       const on = !!f.on;
@@ -312,18 +311,24 @@ export class BoardView {
 
   renderRail() {
     const items = [];
+    this.btnUndo = h('button', { class: 'tbtn', title: 'Undo', 'aria-label': 'Undo', onclick: () => this.doUndo() }, iconEl('undo', 22));
+    this.btnRedo = h('button', { class: 'tbtn', title: 'Redo', 'aria-label': 'Redo', onclick: () => this.doRedo() }, iconEl('redo', 22));
+    items.push(this.btnUndo, this.btnRedo, h('span', { class: 'tsep' }));
     for (const [id, label, ic] of TOOLS) {
       if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.review)) continue;
-      const dis = !this.toolAllowed(id);
-      items.push(h('button', { class: 'tool', 'aria-pressed': String(this.tool === id), disabled: dis, 'data-tool': id, title: label, onclick: () => this.setTool(id) }, iconEl(ic), label));
-      if (id === 'move' || id === 'text' || id === 'ellipse') items.push(h('span', { class: 'rule' }));
+      items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(this.tool === id), disabled: !this.toolAllowed(id), 'data-tool': id, title: label, 'aria-label': label, onclick: () => this.setTool(id) }, iconEl(ic, 22)));
+      if (id === 'move' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
     }
-    items.push(h('span', { class: 'rule' }));
+    items.push(h('span', { class: 'tsep' }));
     for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler']]) {
-      items.push(h('button', { class: 'tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k), label));
+      items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', 'aria-label': label, onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k, 22)));
     }
+    if (this.isTeacher && !this.assign && this.instr.any()) items.push(h('button', { class: 'tbtn' + (this.instr.sharing ? ' on' : ''), 'aria-pressed': String(this.instr.sharing), title: this.instr.sharing ? 'The class sees your instruments. Tap to hide' : 'Show my protractor and ruler to the class', 'aria-label': 'Show my instruments to the class', onclick: () => this.toggleShareInstr() }, iconEl('eye', 22)));
     this.elRail.replaceChildren(...items);
+    this.updateUndo();
   }
+
+  updateUndo() { if (this.btnUndo) { this.btnUndo.disabled = !this.undoStack.length; this.btnRedo.disabled = !this.redoStack.length; } }
 
   setTool(t) {
     if (!this.toolAllowed(t)) return;
@@ -334,58 +339,41 @@ export class BoardView {
     if (t !== 'laser') this.laserPts = [];
   }
 
+  // the little panel under the toolbar: colours and sizes of the current tool
   renderOpts() {
     const o = this.elOpts, t = this.tool, kids = [];
-    kids.push(h('div', { class: 'grp' },
-      h('button', { class: 'ib', onclick: () => this.doUndo(), 'aria-label': 'Undo', title: 'Undo', disabled: !this.undoStack.length }, iconEl('undo')),
-      h('button', { class: 'ib', onclick: () => this.doRedo(), 'aria-label': 'Redo', title: 'Redo', disabled: !this.redoStack.length }, iconEl('redo'))));
-    kids.push(h('span', { class: 'sep' }));
     const colored = t === 'pen' || t === 'highlighter' || t === 'text' || SHAPES.has(t);
+    const sizes = onPick => [0, 1, 2].map(i => h('button', { class: 'sz', 'aria-label': ['Thin', 'Medium', 'Thick'][i], title: ['Thin', 'Medium', 'Thick'][i], 'aria-pressed': String(this.sizeIdx === i), onclick: () => onPick(i) }, h('i', { style: { height: [2, 4, 8][i] + 'px' } })));
     if (t === 'stamp') {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Stamp' }, STAMPS.map(([k, name]) =>
         h('button', { class: 'stampbtn', 'aria-label': name, title: name, 'aria-pressed': String(this.stampKind === k), onclick: () => { this.stampKind = k; this.renderOpts(); } }, this.stampPreview(k)))));
-      kids.push(h('span', { class: 'sep' }));
-      const names = ['Small', 'Medium', 'Large'], px = [6, 12, 20];
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, [0, 1, 2].map(i =>
-        h('button', { class: 'sz', 'aria-label': names[i], title: names[i], 'aria-pressed': String(this.sizeIdx === i), onclick: () => { this.sizeIdx = i; this.renderOpts(); } }, h('i', { style: { width: px[i] + 'px', height: px[i] + 'px' } })))));
-      kids.push(h('span', { class: 'note' }, 'Tap the page to place the stamp.'));
+      kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })));
+      kids.push(h('span', { class: 'note' }, 'Tap the page to place it'));
     } else if (colored) {
       const pal = t === 'highlighter' ? HL_COLORS : (this.copy ? STUDENT_ASSIGN_COLORS : PEN_COLORS), cur = t === 'highlighter' ? this.hlColor : this.color;
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Colour' }, pal.map(([name, hex]) =>
         h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(cur === hex), onclick: () => { if (t === 'highlighter') this.hlColor = hex; else this.color = hex; this.applyEditorStyle(); this.renderOpts(); } }))));
-      kids.push(h('span', { class: 'sep' }));
-      const names = ['Small', 'Medium', 'Large'], px = [6, 12, 20];
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, [0, 1, 2].map(i =>
-        h('button', { class: 'sz', 'aria-label': names[i], title: names[i], 'aria-pressed': String(this.sizeIdx === i), onclick: () => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); } }, h('i', { style: { width: px[i] + 'px', height: px[i] + 'px' } })))));
+      kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
     } else {
-      const notes = {
-        move: 'Drag to move the page. Pinch or use + and − to zoom. Tap a mark to see who wrote it.',
-        eraser: 'Touch a mark to remove the whole mark. Undo brings it back.',
-        laser: 'Move over the page. Everyone sees a red dot that fades away.',
-      };
-      kids.push(h('span', { class: 'note' }, notes[t] || ''));
+      const notes = { eraser: 'Touch a mark to remove it. Undo brings it back.', laser: 'Move over the page: everyone sees a red dot.' };
+      if (notes[t]) kids.push(h('span', { class: 'note' }, notes[t]));
     }
     if (this.editor) kids.push(h('button', { class: 'btn primary sm', onclick: () => this.commitEditor() }, iconEl('check', 18), 'Done'));
-    if (this.isTeacher && !this.assign && this.instr.any()) kids.push(h('button', { class: 'btn sm' + (this.instr.sharing ? ' on' : ''), 'aria-pressed': String(this.instr.sharing), title: 'Show your protractor and ruler to the class', 'aria-label': 'Show my protractor and ruler to the class', onclick: () => this.toggleShareInstr() }, iconEl('eye', 18), h('span', { class: 'lbl-opt2' }, this.instr.sharing ? 'Class sees it' : 'Show class')));
-    kids.push(h('span', { class: 'grow' }));
-    const wide = h('div', { class: 'grp only-wide' }, ...this.navControls());
-    kids.push(wide);
+    o.hidden = !kids.length;
     o.replaceChildren(...kids);
-    this.zoomPill.replaceChildren(...this.navControls());
-    if (!this.zoomPill.isConnected) this.stage.append(this.zoomPill);
-    this.updatePager();
+    this.updateUndo(); this.updatePager();
   }
 
   navControls() {
     return [
-      h('button', { class: 'ib', onclick: () => this.zoomStep(1 / 1.25), 'aria-label': 'Zoom out', title: 'Zoom out' }, iconEl('minus')),
-      h('button', { class: 'ib', onclick: () => { this.fit(); }, 'aria-label': 'Fit page', title: 'Fit page' }, iconEl('fit')),
-      h('button', { class: 'ib', onclick: () => this.zoomStep(1.25), 'aria-label': 'Zoom in', title: 'Zoom in' }, iconEl('plus')),
+      h('button', { class: 'ib', onclick: () => this.zoomStep(1 / 1.25), 'aria-label': 'Zoom out', title: 'Zoom out' }, iconEl('minus', 20)),
+      h('button', { class: 'ib', onclick: () => { this.fit(); }, 'aria-label': 'Fit page', title: 'Fit page' }, iconEl('fit', 20)),
+      h('button', { class: 'ib', onclick: () => this.zoomStep(1.25), 'aria-label': 'Zoom in', title: 'Zoom in' }, iconEl('plus', 20)),
       h('span', { class: 'sep' }),
       h('div', { class: 'pg-nav' },
-        h('button', { class: 'ib', onclick: () => this.goPage(-1), 'aria-label': 'Previous page', title: 'Previous page' }, iconEl('left')),
+        h('button', { class: 'ib', onclick: () => this.goPage(-1), 'aria-label': 'Previous page', title: 'Previous page' }, iconEl('left', 20)),
         h('span', { class: 'pg-num', 'aria-live': 'polite' }, ''),
-        h('button', { class: 'ib', onclick: () => this.goPage(1), 'aria-label': 'Next page', title: 'Next page' }, iconEl('right'))),
+        h('button', { class: 'ib', onclick: () => this.goPage(1), 'aria-label': 'Next page', title: 'Next page' }, iconEl('right', 20))),
     ];
   }
 
@@ -448,16 +436,24 @@ export class BoardView {
     this.renderPanel();
   }
 
-  onResize() { if (this.autoFit && this.page) { this.fitNow(false); this.applyView(); } }
+  placePop() { if (this.elOpts && this.elTop) this.elOpts.style.top = (this.elTop.offsetHeight + 10) + 'px'; }
+
+  onResize() { this.placePop(); if (this.autoFit && this.page) { this.fitNow(false); this.applyView(); } }
 
   stageSize() { return { w: this.stage.clientWidth || 800, h: this.stage.clientHeight || 600 }; }
 
-  fitScale() { const { w, h } = this.stageSize(), pg = this.page; if (!pg) return 1; const pad = w < 600 ? 8 : 20; return Math.max(MIN_S, Math.min((w - pad * 2) / 1000, (h - pad * 2) / pg.h)); }
+  insetTop() {   // room for the floating colour panel
+    const narrow = this.stage && this.stage.clientWidth < 720;
+    if (!narrow) return 58;
+    return this.elOpts && !this.elOpts.hidden ? Math.min(110, this.elOpts.offsetHeight + 14) : 10;
+  }
+
+  fitScale() { const { w, h } = this.stageSize(), pg = this.page; if (!pg) return 1; const pad = w < 600 ? 8 : 20; return Math.max(MIN_S, Math.min((w - pad * 2) / 1000, (h - pad * 2 - this.insetTop()) / pg.h)); }
 
   fitNow() {
     const pg = this.page; if (!pg) return;
-    const { w, h } = this.stageSize(), s = this.fitScale();
-    this.view = { s, tx: (w - 1000 * s) / 2, ty: Math.max(12, (h - pg.h * s) / 2) };
+    const { w, h } = this.stageSize(), s = this.fitScale(), top = this.insetTop();
+    this.view = { s, tx: (w - 1000 * s) / 2, ty: Math.max(12, top + (h - top - pg.h * s) / 2) };
   }
   fit() { this.userMoved(); this.autoFit = true; this.fitNow(); this.applyView(); }
 
@@ -521,7 +517,7 @@ export class BoardView {
     clearInterval(this.shareTimer);
     if (on) { this.store.sendInstr(this.instr.shared()); this.shareTimer = setInterval(() => this.store.sendInstr(this.instr.shared()), 4000); toast('Students now see your protractor and ruler.'); }
     else { this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null }); toast('Students no longer see them.'); }
-    this.renderOpts();
+    this.renderRail();
   }
 
   // ===================================================================== rendering
@@ -951,7 +947,7 @@ export class BoardView {
   }
 
   // ===================================================================== undo / redo
-  pushUndo(a) { this.undoStack.push(a); if (this.undoStack.length > 120) this.undoStack.shift(); this.redoStack = []; this.renderOpts(); }
+  pushUndo(a) { this.undoStack.push(a); if (this.undoStack.length > 120) this.undoStack.shift(); this.redoStack = []; this.updateUndo(); }
   applyAction(a, inverse) {
     let pages = [];
     if (a.t === 'create') pages = this.store.setDeleted([a.id], inverse);
@@ -962,12 +958,12 @@ export class BoardView {
   doUndo() {
     if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
     this.commitEditor(); const a = this.undoStack.pop(); if (!a) return;
-    this.applyAction(a, true); this.redoStack.push(a); this.renderOpts();
+    this.applyAction(a, true); this.redoStack.push(a); this.updateUndo();
   }
   doRedo() {
     if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
     this.commitEditor(); const a = this.redoStack.pop(); if (!a) return;
-    this.applyAction(a, false); this.undoStack.push(a); this.renderOpts();
+    this.applyAction(a, false); this.undoStack.push(a); this.updateUndo();
   }
 
   // ===================================================================== side panels

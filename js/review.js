@@ -82,10 +82,10 @@ export class ReviewView {
       h('div', { class: 'rv-title' }, h('b', null, b.title), h('span', { class: 'tag' }, 'Assignment'), h('span', { class: 'tag' + (b.due_at && new Date(b.due_at) < Date.now() ? ' warn' : '') }, due), this.timerCtl.el, this.elStatus),
       h('div', { class: 'rv-acts' },
         h('button', { class: 'btn sm' + (b.locked ? ' on' : ''), onclick: () => this.toggleLock() }, iconEl(b.locked ? 'lock' : 'unlock', 18), b.locked ? 'Writing locked' : 'Lock writing'),
-        h('button', { class: 'btn sm', onclick: () => this.timerCtl.dialog() }, iconEl('timer', 18), 'Timer'),
-        h('button', { class: 'btn sm', onclick: () => this.datesDialog() }, iconEl('file', 18), 'Dates'),
-        h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), 'Share'),
-        h('button', { class: 'btn sm', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), 'Add pages'),
+        h('button', { class: 'btn sm', title: 'Class timer', 'aria-label': 'Class timer', onclick: () => this.timerCtl.dialog() }, iconEl('timer', 18), h('span', { class: 'rv-lbl' }, 'Timer')),
+        h('button', { class: 'btn sm', title: 'Start and due time', 'aria-label': 'Start and due time', onclick: () => this.datesDialog() }, iconEl('file', 18), h('span', { class: 'rv-lbl' }, 'Dates')),
+        h('button', { class: 'btn sm', title: 'Share with students', 'aria-label': 'Share with students', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'rv-lbl' }, 'Share')),
+        h('button', { class: 'btn sm', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), h('span', { class: 'rv-lbl' }, 'Add pages')),
         h('button', { class: 'btn sm primary', onclick: () => this.exportClass() }, iconEl('file', 18), 'Export class PDF')));
   }
 
