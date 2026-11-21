@@ -1,5 +1,5 @@
 // Teacher side: sign-in, dashboard (classes + boards), opening a board.
-import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE } from './util.js';
+import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE, makeCodes } from './util.js';
 import { iconEl } from './icons.js';
 import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
@@ -126,10 +126,10 @@ export class TeacherApp {
 
   renderDashboard() {
     const tabs = [h('button', { class: 'tab', 'aria-current': String(this.sel === 'all'), onclick: () => { this.sel = 'all'; this.renderDashboard(); } }, 'All boards', h('span', { class: 'n' }, this.boards.length))];
-    for (const c of this.classes) {
+    this.classes.forEach((c, ci) => {
       const n = this.boards.filter(b => b.class_id === c.id).length;
-      tabs.push(h('button', { class: 'tab', 'aria-current': String(this.sel === c.id), onclick: () => { this.sel = c.id; this.renderDashboard(); } }, c.name, h('span', { class: 'n' }, n)));
-    }
+      tabs.push(h('button', { class: 'tab c' + (ci % 5 + 1), 'aria-current': String(this.sel === c.id), onclick: () => { this.sel = c.id; this.renderDashboard(); } }, c.name, h('span', { class: 'n' }, n)));
+    });
     const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' }, h('h2', null, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
 
@@ -155,10 +155,10 @@ export class TeacherApp {
       if (error) return toast(friendlyError(error), 'bad');
       b.link_enabled = val; sw.setAttribute('aria-checked', String(val)); sw.lastChild.textContent = val ? 'Link on' : 'Link off';
     });
-    return h('div', { class: 'board-row' },
+    return h('div', { class: 'board-row' + (b.mode === 'assignment' ? ' assign' : '') },
       h('div', null,
         h('button', { class: 'title', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title),
-        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag' }, 'Assignment') : h('span', { class: 'tag' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })))),
+        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })))),
       h('div', { class: 'acts' }, sw,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
         h('button', { class: 'btn sm primary', onclick: () => { location.hash = '#/board/' + b.id; } }, 'Open'),
@@ -168,22 +168,60 @@ export class TeacherApp {
   classPanel(cls) {
     const mine = this.students.filter(s => s.class_id === cls.id);
     const input = h('input', { class: 'input', placeholder: 'First names, like: Mia, Ben, Nok', 'aria-label': 'Add student first names' });
+    const taken = () => new Set(mine.map(s => s.code).filter(Boolean));
+    const refresh = async () => { await this.loadAll(); this.renderDashboard(); };
     const add = async () => {
-      const names = input.value.split(/[,\n;]+/).map(s => s.trim().slice(0, 24)).filter(Boolean);
-      if (!names.length) return;
-      const { error } = await this.sb.from('class_students').insert(names.map(n => ({ class_id: cls.id, first_name: n })));
+      const have = new Set(mine.map(s => s.first_name.toLowerCase()));
+      const names = [...new Set(input.value.split(/[,\n;]+/).map(s => s.trim().slice(0, 24)).filter(Boolean))].filter(n => !have.has(n.toLowerCase()));
+      if (!names.length) { toast('Type new first names, separated by commas.'); return; }
+      const codes = makeCodes(names.length, taken());
+      const { error } = await this.sb.from('class_students').insert(names.map((n, i) => ({ class_id: cls.id, first_name: n, code: codes[i] })));
       if (error) return toast(friendlyError(error), 'bad');
-      input.value = ''; await this.loadAll(); this.renderDashboard();
+      input.value = ''; toast(`${names.length} student${names.length === 1 ? '' : 's'} added, each with a 4-number code.`, 'ok'); await refresh();
+    };
+    const fillMissing = async () => {
+      const miss = mine.filter(s => !s.code), codes = makeCodes(miss.length, taken());
+      for (let i = 0; i < miss.length; i++) await this.sb.from('class_students').update({ code: codes[i] }).eq('id', miss[i].id);
+      await refresh();
+    };
+    const renewAll = async () => {
+      const ok = await confirmDialog({ title: 'Make new codes for everyone?', text: 'Every student gets a new 4-number code. Students who already opened their work on a device keep their access there, but the old codes stop working on other devices.', confirmLabel: 'Make new codes' });
+      if (!ok) return;
+      const codes = makeCodes(mine.length);
+      for (let i = 0; i < mine.length; i++) await this.sb.from('class_students').update({ code: codes[i] }).eq('id', mine[i].id);
+      await refresh();
+    };
+    const editCode = s => {
+      const inp = h('input', { class: 'input big', id: 'ec', value: s.code || '', inputmode: 'numeric', maxlength: '4', style: { letterSpacing: '.3em', textAlign: 'center', width: '200px' } });
+      inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, '').slice(0, 4); });
+      const err = h('p', { class: 'error', role: 'alert' });
+      const save = async (v) => {
+        if (!/^\d{4}$/.test(v)) { err.textContent = 'A code is 4 numbers.'; return; }
+        if (mine.some(o => o.id !== s.id && o.code === v)) { err.textContent = 'Another student already has this code. Pick a different one.'; return; }
+        const { error } = await this.sb.from('class_students').update({ code: v }).eq('id', s.id);
+        if (error) { err.textContent = friendlyError(error); return; }
+        m.close(); await refresh();
+      };
+      const m = modal({ title: `${s.first_name}: code`, body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'ec' }, '4-number code'), inp), err),
+        actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn', onclick: () => save(makeCodes(1, taken())[0]) }, 'Random code'), h('button', { class: 'btn primary', onclick: () => save(inp.value) }, 'Save')] });
     };
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    const missing = mine.filter(s => !s.code).length;
+    const COL = ['c1', 'c2', 'c3', 'c4', 'c5'];
     return h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `${cls.name}: students`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
           h('button', { class: 'btn sm', onclick: () => this.renameClass(cls) }, 'Rename class'),
           h('button', { class: 'btn sm danger', onclick: () => this.deleteClassDialog(cls) }, iconEl('trash', 18), 'Delete class'))),
-      mine.length ? h('div', { class: 'chips' }, mine.map(s => h('span', { class: 'chip' }, s.first_name,
-        h('button', { 'aria-label': `Remove ${s.first_name}`, onclick: async () => { const { error } = await this.sb.from('class_students').delete().eq('id', s.id); if (error) return toast(friendlyError(error), 'bad'); await this.loadAll(); this.renderDashboard(); } }, iconEl('close', 16)))))
-        : h('p', { class: 'empty' }, 'No names yet. Add first names so students can tap their name when they join. If you leave this empty, students type their own name.'),
+      mine.length ? h('div', { class: 'roster-grid' }, mine.map((s, i) => h('div', { class: 'rs-card ' + COL[i % COL.length] },
+        h('b', { class: 'nm' }, s.first_name),
+        s.code ? h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => editCode(s) }, s.code) : h('button', { class: 'btn sm', onclick: () => editCode(s) }, 'Make code'),
+        h('button', { class: 'x', 'aria-label': `Remove ${s.first_name}`, onclick: async () => { const ok = await confirmDialog({ title: `Remove ${s.first_name}?`, text: 'This removes the name from the class list. Work they already did on boards stays until you delete it.', confirmLabel: 'Remove', danger: true }); if (!ok) return; const { error } = await this.sb.from('class_students').delete().eq('id', s.id); if (error) return toast(friendlyError(error), 'bad'); await refresh(); } }, iconEl('close', 16)))))
+        : h('p', { class: 'empty' }, h('b', null, 'No students yet. '), 'Type first names below. Each student gets a 4-number code. On a board of this class, students tap their own name and type their code, so nobody can open another student\'s work.'),
+      mine.length ? h('div', { class: 'roster-acts' },
+        missing ? h('button', { class: 'btn sm primary', onclick: fillMissing }, `Make codes for ${missing}`) : null,
+        h('button', { class: 'btn sm', onclick: async () => toast((await copyText(mine.map(s => `${s.first_name}: ${s.code || '-'}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes'),
+        h('button', { class: 'btn sm', onclick: renewAll }, 'New codes for everyone')) : null,
       h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
   }
 

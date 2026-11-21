@@ -5,4 +5,5 @@ export const CONFIG = {
   SUPABASE_KEY: 'sb_publishable_TuLsUYJME-pWaGbg29Bjtw_313hoctz',
   STORAGE_BUCKET: 'boards',
   APP_NAME: 'Bright EngMath Live Board',
+  TEACHER_NAME: 'Maya',   // shown to students: "Waiting for Teacher Maya to check your work"
 };

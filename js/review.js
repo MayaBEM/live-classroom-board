@@ -7,6 +7,7 @@ import { PageRenderer } from './thumbs.js';
 import { exportDialog } from './export.js';
 import { openAddPages } from './pages.js';
 import { TimerController } from './timer.js';
+import { shareDialog } from './share.js';
 
 const ONLINE_MS = 75000;
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -121,7 +122,7 @@ export class ReviewView {
       this.updateCard(c, p); nodes.push(c.el);
     }
     for (const id of [...this.cards.keys()]) if (!ps.some(p => p.id === id)) this.cards.delete(id);
-    if (this.filter === 'all') for (const n of this.notJoined()) nodes.push(h('div', { class: 'rv-card ghost' }, h('div', { class: 'rv-name' }, h('b', null, n)), h('p', { class: 'hint' }, 'Has not joined yet')));
+    if (this.filter === 'all') for (const n of this.notJoined()) nodes.push(h('button', { class: 'rv-card ghost', title: `Open ${n}'s copy before they join`, onclick: () => this.openGhost(n) }, h('div', { class: 'rv-name' }, h('b', null, n), h('span', { class: 'rv-state' }, 'Not started')), h('p', { class: 'hint' }, 'Has not joined yet. Click to open their copy and write on it first.')));
     this.elGrid.replaceChildren(...(nodes.length ? nodes : [h('div', { class: 'empty' }, this.people().length ? 'No students match this filter.' : h('span', null, h('b', null, 'No students yet. '), 'Press Share and send the link or the code. Each student gets their own private copy of every page, and you will see their writing here as they work.'))]));
   }
 
@@ -211,6 +212,16 @@ export class ReviewView {
     this.render(); this.refreshAll();
   }
 
+  // a student who has not joined yet: make their copy so the teacher can already write on it (the student takes it over with their code)
+  async openGhost(name) {
+    try {
+      const { data: { user } } = await this.sb.auth.getUser();
+      const { data, error } = await this.sb.from('participants').insert({ board_id: this.store.boardId, user_id: user.id, name }).select().single();
+      if (error) throw error;
+      this.store.participantsMap.set(data.id, data); this._ids = null; this.openStudent(data.id);
+    } catch (e) { toast(friendlyError(e), 'bad'); }
+  }
+
   // ----------------------------------------------------------------- actions
   async toggleLock() {
     const b = this.store.board, val = !b.locked; b.locked = val; this.renderHeader();
@@ -218,7 +229,7 @@ export class ReviewView {
     if (error) { b.locked = !val; this.renderHeader(); toast(friendlyError(error), 'bad'); } else toast(val ? 'Everyone is locked out of writing.' : 'Students can write again.');
   }
 
-  shareDialog() { BoardView.prototype.shareDialog.call({ store: this.store, sb: this.sb }); }
+  shareDialog() { return shareDialog({ sb: this.sb, store: this.store }); }
 
   datesDialog() {
     const b = this.store.board;

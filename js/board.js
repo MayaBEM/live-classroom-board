@@ -8,6 +8,8 @@ import { Instruments } from './instruments.js';
 import { TimerController } from './timer.js';
 import { PageRenderer } from './thumbs.js';
 import { exportDialog } from './export.js';
+import { shareDialog } from './share.js';
+import { CONFIG } from '../config.js';
 import { friendlyError } from './db.js';
 import { openAddPages } from './pages.js';
 
@@ -194,13 +196,24 @@ export class BoardView {
     } else if (this.copy) {
       const me = this.store.me || {}, why = this.lockReason();
       const names = { submitted: 'Submitted', locked: 'Writing is locked', pastdue: 'Past due', notstarted: 'Not open yet' };
-      this.elLockTag.hidden = !why;
+      this.elLockTag.hidden = !why || why === 'submitted';
       this.elLockTag.replaceChildren(iconEl('lock', 16), h('span', { class: 'lbl' }, names[why] || ''));
       this.elDueTag.hidden = !b.due_at;
       if (b.due_at) { const late = new Date(b.due_at) < Date.now(); this.elDueTag.className = 'tag' + (late ? ' warn' : ''); this.elDueTag.textContent = `Due ${fmtWhen(b.due_at)}`; }
       this.elScoreTag.hidden = !me.score; if (me.score) this.elScoreTag.textContent = `Score ${me.score}`;
       this.btnFeedback.hidden = !me.comment;
-      this.btnSubmit.hidden = !!(why === 'submitted' || why === 'pastdue' || why === 'notstarted');
+      const sent = why === 'submitted', T = CONFIG.TEACHER_NAME || 'your teacher';
+      this.btnSubmit.hidden = !!(why === 'pastdue' || why === 'notstarted');
+      this.btnSubmit.disabled = sent;
+      this.btnSubmit.className = sent ? 'btn sent sm' : 'btn primary sm';
+      this.btnSubmit.replaceChildren(iconEl('check', 18), h('span', { class: 'lbl' }, sent ? 'Sent' : 'Submit'));
+      this.btnSubmit.title = sent ? 'You sent your work' : 'Send your work to your teacher';
+      if (sent) {
+        const checked = !!(me.score || me.comment);
+        this.banner.className = 'banner sent' + (checked ? ' checked' : '');
+        this.banner.replaceChildren(iconEl(checked ? 'star' : 'check', 20), h('span', null, checked ? `Teacher ${T} checked your work.` : `Sent! Waiting for Teacher ${T} to check your work.`));
+        this.banner.hidden = false;
+      } else this.banner.hidden = true;
     } else if (this.isTeacher) {
       this.btnFollow.setAttribute('aria-pressed', String(!!f.on)); this.btnFollow.classList.toggle('on', !!f.on);
       this.btnFollow.querySelector('.lbl').textContent = f.on ? 'Following: ON' : 'Follow me';
@@ -1062,29 +1075,7 @@ export class BoardView {
   }
 
   // ===================================================================== dialogs (teacher)
-  shareDialog() {
-    const b = this.store.board, link = joinUrl(b.code);
-    const sw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(b.link_enabled) }, h('span', { class: 'box' }), h('span', { class: 'txt' }, b.link_enabled ? 'Link is ON: students can join' : 'Link is OFF: nobody can join'));
-    sw.addEventListener('click', async () => {
-      const val = !b.link_enabled;
-      const { error } = await this.sb.from('boards').update({ link_enabled: val }).eq('id', b.id);
-      if (error) return toast(friendlyError(error), 'bad');
-      b.link_enabled = val; sw.setAttribute('aria-checked', String(val));
-      sw.querySelector('.txt').textContent = val ? 'Link is ON: students can join' : 'Link is OFF: nobody can join';
-      toast(val ? 'Link is on.' : 'Link is off. Students who were inside are disconnected.');
-    });
-    const linkIn = h('input', { class: 'input', readonly: true, value: link, 'aria-label': 'Student link', onfocus: e => e.target.select() });
-    modal({
-      title: 'Send this to your students',
-      body: h('div', null,
-        h('div', { class: 'label', style: { marginBottom: '6px' } }, 'Student link'),
-        h('div', { class: 'copybox' }, linkIn, h('button', { class: 'btn primary', onclick: async () => { toast((await copyText(link)) ? 'Link copied.' : 'Press Ctrl+C to copy the link.', 'ok'); } }, iconEl('copy', 18), 'Copy')),
-        h('div', { class: 'label', style: { marginBottom: '6px' } }, 'Short code'),
-        h('div', { class: 'code-big', 'aria-label': 'Short code ' + b.code.split('').join(' ') }, b.code),
-        h('p', { class: 'hint', style: { margin: '8px 0 16px' } }, `Students open the link and type their first name (and an optional 4-number PIN to come back to their own work). Or they open ${new URL(BASE).host}${new URL(BASE).pathname}, press "I am a student" and type the code.`),
-        sw),
-    });
-  }
+  shareDialog() { return shareDialog({ sb: this.sb, store: this.store }); }
 
   clearDialog() {
     const doClear = all => {

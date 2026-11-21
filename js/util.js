@@ -110,3 +110,20 @@ export function makeCode(n = 6) {
   const a = new Uint32Array(n); crypto.getRandomValues(a);
   return [...a].map(v => CODE_ALPHABET[v % CODE_ALPHABET.length]).join('');
 }
+
+// ---- share messages (what the teacher copies and sends to students)
+export const randomCode4 = () => String(1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000));
+export function makeCodes(n, taken = new Set()) {
+  const out = [];
+  while (out.length < n) { const c = randomCode4(); if (!taken.has(c)) { taken.add(c); out.push(c); } }
+  return out;
+}
+export function shareMessage({ title, link, teacher = 'Maya', name = null, code = null }) {
+  const L = [];
+  L.push('BRIGHT ENGMATH', title, '--------------------------');
+  L.push('1. Open the board:', link, '');
+  if (name && code) L.push(`2. Tap your name: ${name}`, `3. Type your code: ${code}`);
+  else L.push('2. Tap your name', '3. Type your 4-number code from your teacher');
+  L.push('4. Start writing!', '--------------------------', `From Teacher ${teacher}`);
+  return L.join('\n');
+}
