@@ -13,7 +13,13 @@ export async function boardMemberIds(sb, boardId) {
 
 // the students of a board, with their codes: class members, narrowed to the board's own list when it has one
 export async function boardRoster(sb, board) {
-  if (!board.class_id) return [];
+  if (!board.class_id) {
+    const ids = await boardMemberIds(sb, board.id);
+    if (!ids.size) return [];
+    const r = await sb.from('students').select('id,first_name,code').in('id', [...ids]).order('first_name');
+    if (r.error) throw r.error;
+    return (r.data || []).map(x => ({ first_name: x.first_name, code: x.code, student_id: x.id }));
+  }
   const { data, error } = await sb.from('class_students').select('first_name,code,student_id').eq('class_id', board.class_id).order('first_name');
   if (error) throw error;
   const rows = data || [];

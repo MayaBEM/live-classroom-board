@@ -25,6 +25,7 @@ export const BASE = new URL('../', import.meta.url).href;
 export const asset = p => BASE + p;
 export const joinUrl = code => `${BASE}#/join/${code}`;
 export const classUrl = code => `${BASE}#/class/${code}`;
+export const studentUrl = code => `${BASE}#/me/${code}`;
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
@@ -136,4 +137,9 @@ export function classShareMessage({ name, link, teacher = 'Maya', student = null
   else L.push('2. Tap your name', '3. Type your 4-number code from your teacher');
   L.push('4. Pick the board you want to open', '--------------------------', `From Teacher ${teacher}`);
   return L.join('\n');
+}
+
+// the one message for a student's own page
+export function studentPageMessage({ name, link, code, teacher = 'Maya' }) {
+  return ['BRIGHT ENGMATH', `${name}'s page`, '--------------------------', '1. Open your page:', link, '', `2. Type your code: ${code}`, '3. Pick the work you want to do', '--------------------------', `From Teacher ${teacher}`].join('\n');
 }

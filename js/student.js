@@ -253,3 +253,91 @@ export async function startClass(root, classCode) {
   if (saved && saved.name && saved.pin) { const r = await portal(saved.name, saved.pin); if (r.data) return showBoards(r.data, saved.name, saved.pin); forget(); }
   showNames();
 }
+
+// a student's own page: one private link, one code, and every piece of work made for that student.
+// Work that has not been started yet is marked NEW and moves, so it is clear what to do.
+export async function startMe(root, pageCode) {
+  pageCode = pageCode.toUpperCase();
+  const sb = makeClient('student');
+  const slot = new URLSearchParams(location.search).get('slot') || '';
+  const saveKey = `bem-me-${pageCode}-${slot}`;
+  const page = (cls, ...kids) => root.replaceChildren(h('div', { class: 'entry student ' + cls }, h('div', { class: 'side' }, brand(true), ...kids), h('div', { class: 'art', 'aria-hidden': 'true' }, artSvg())));
+  page('', h('p', { class: 'lead' }, 'Opening your page…'));
+
+  let info;
+  try {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) { const { error } = await sb.auth.signInAnonymously(); if (error) throw error; }
+    const r = await sb.rpc('get_student_page', { p_page: pageCode });
+    if (r.error) throw r.error;
+    info = r.data;
+  } catch (e) {
+    console.error(e);
+    return page('', h('div', { class: 'notice bad' }, 'We could not connect. ' + friendlyError(e)), h('button', { class: 'btn primary', onclick: () => startMe(root, pageCode) }, 'Try again'));
+  }
+  if (!info.found) return page('', h('h1', null, 'Page not found'), h('p', { class: 'lead' }, 'Check the link your teacher sent.'));
+  const name = info.name;
+
+  let savedPin = null; try { savedPin = localStorage.getItem(saveKey); } catch (e) { /* ignore */ }
+  const forget = () => { try { localStorage.removeItem(saveKey); } catch (e) { /* ignore */ } savedPin = null; };
+  const portal = async pin => {
+    const { data, error } = await sb.rpc('student_portal', { p_page: pageCode, p_pin: pin });
+    if (error) return { err: friendlyError(error) };
+    if (data.error) return { err: MESSAGES[data.error] || 'Try again.' };
+    try { localStorage.setItem(saveKey, pin); } catch (e) { /* ignore */ }
+    return { data };
+  };
+
+  function showCode() {
+    const boxes = [0, 1, 2, 3].map(i => h('input', { class: 'pin-box', inputmode: 'numeric', maxlength: '1', autocomplete: i === 0 ? 'one-time-code' : 'off', 'aria-label': `Code number ${i + 1}`, pattern: '[0-9]' }));
+    const err = h('p', { class: 'error', role: 'alert' });
+    const val = () => boxes.map(b => b.value).join('');
+    const go = async () => {
+      const v = val(); if (v.length !== 4) return; err.textContent = '';
+      const r = await portal(v);
+      if (r.data) showBoards(r.data, v); else { err.textContent = r.err; boxes.forEach(b => { b.value = ''; }); boxes[0].focus(); }
+    };
+    boxes.forEach((b, i) => {
+      b.addEventListener('input', () => { b.value = b.value.replace(/\D/g, '').slice(-1); if (b.value && i < 3) boxes[i + 1].focus(); if (val().length === 4) go(); });
+      b.addEventListener('keydown', e => { if (e.key === 'Backspace' && !b.value && i > 0) boxes[i - 1].focus(); if (e.key === 'Enter') go(); });
+      b.addEventListener('paste', e => { const d = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4); if (!d) return; e.preventDefault(); d.split('').forEach((c, k) => { boxes[k].value = c; }); if (d.length === 4) go(); });
+    });
+    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${name}!`)),
+      h('p', { class: 'step' }, h('span', { class: 'n n3' }, '1'), 'Type your 4-number code'), h('div', { class: 'pin-row' }, boxes), err);
+    boxes[0].focus();
+  }
+
+  const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+  function showBoards(data, pin) {
+    const refresh = async () => { const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
+    const card = b => {
+      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, fresh = b.status === 'new' && !locked;
+      return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
+        h('div', { class: 'bc-main' },
+          h('b', null, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
+          h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
+            b.class ? h('span', null, b.class) : null,
+            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
+          h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
+        h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
+          const btn = e.currentTarget; btn.disabled = true;
+          const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
+          if (r) { btn.disabled = false; toast(r.text, 'bad'); }
+        } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : fresh ? 'Start' : 'Open'));
+    };
+    const fresh = data.boards.filter(b => b.status === 'new' && b.code);
+    const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort((a, b) => (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0));
+    const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
+    page('no-art',
+      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`)),
+      fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
+      data.boards.length ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
+      todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
+      done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
+      h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')));
+  }
+
+  if (savedPin) { const r = await portal(savedPin); if (r.data) return showBoards(r.data, savedPin); forget(); }
+  showCode();
+}

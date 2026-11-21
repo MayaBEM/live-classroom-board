@@ -640,3 +640,13 @@ table.prog thead th { font-size: 13px; color: var(--ink-2); max-width: 160px; ov
 .who-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 14px; color: var(--ink-2); }
 .tag.who { background: #fff; border: 1px solid rgba(0,0,0,.3); color: var(--ink); }
 .pg-na { color: var(--ink-2); padding: 0 12px; }
+
+/* ---- a student's own page: new work is marked and moves */
+.new-badge { display: inline-block; margin-right: 8px; padding: 1px 8px; background: var(--orange); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: .08em; border: 1px solid rgba(0,0,0,.35); animation: newhop 1.4s ease-in-out infinite; transform-origin: 50% 100%; }
+.new-banner { display: flex; align-items: center; gap: 10px; padding: 12px 14px; margin-bottom: 14px; background: var(--sun); border: 2px solid var(--ink); font-weight: 600; font-size: 18px; }
+.new-banner .new-badge { margin: 0; }
+.bcard.is-new { animation: newnudge 2.6s ease-in-out infinite; }
+.bcard.is-new .btn.primary { animation: newhop 1.4s ease-in-out infinite; }
+@keyframes newhop { 0%, 55%, 100% { transform: translateY(0); } 15% { transform: translateY(-6px); } 30% { transform: translateY(0); } 42% { transform: translateY(-3px); } }
+@keyframes newnudge { 0%, 70%, 100% { transform: translateX(0); } 76% { transform: translateX(-4px); } 82% { transform: translateX(4px); } 88% { transform: translateX(-3px); } 94% { transform: translateX(0); } }
+.rs-card .nm-link { border: 0; background: transparent; padding: 0; text-align: left; font: inherit; font-size: 18px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }

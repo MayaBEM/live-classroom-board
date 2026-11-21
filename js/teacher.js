@@ -1,5 +1,5 @@
 // Teacher side: sign-in, dashboard (classes + boards), opening a board.
-import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, classUrl, classShareMessage, BASE, makeCodes, makeCode } from './util.js';
+import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, classUrl, studentUrl, classShareMessage, studentPageMessage, BASE, makeCodes, makeCode } from './util.js';
 import { CONFIG } from '../config.js';
 import { iconEl } from './icons.js';
 import { makeClient, friendlyError } from './db.js';
@@ -122,7 +122,8 @@ export class TeacherApp {
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
     this.members = new Map();
     (bm.data || []).forEach(r => { if (!this.members.has(r.board_id)) this.members.set(r.board_id, new Set()); this.members.get(r.board_id).add(r.student_id); });
-    if (this.sel !== 'all' && this.sel !== 'students' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
+    if (this.sel.startsWith('stu:')) { if (!this.master.some(x => 'stu:' + x.id === this.sel)) this.sel = 'students'; }
+    else if (this.sel !== 'all' && this.sel !== 'students' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
   }
 
   async showDashboard() {
@@ -143,12 +144,14 @@ export class TeacherApp {
     const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' },
       h('h2', null, 'My students'),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
+      this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
       h('h2', { style: { marginTop: '14px' } }, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
 
     const main = h('main', { class: 'dash-main' });
-    if (this.sel === 'students') {
-      main.append(this.studentsPanel());
+    const stu = this.sel.startsWith('stu:') ? this.master.find(x => 'stu:' + x.id === this.sel) : null;
+    if (this.sel === 'students' || stu) {
+      if (stu) main.append(...this.studentPagePanels(stu)); else main.append(this.studentsPanel());
       this.root.replaceChildren(h('div', { class: 'dash' },
         h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
         h('div', { class: 'dash-body' }, side, main)));
@@ -180,7 +183,7 @@ export class TeacherApp {
       h('div', { class: 'dash-body' }, side, main)));
   }
 
-  boardRow(b) {
+  boardRow(b, extra = null) {
     const pages = (b.pages && b.pages[0] && b.pages[0].count) || 0, link = joinUrl(b.code);
     const sw = h('button', { class: 'switch', role: 'switch', 'aria-checked': String(b.link_enabled), 'aria-label': 'Student link on or off', title: 'Turn the student link on or off' }, h('span', { class: 'box' }), h('span', null, b.link_enabled ? 'Link on' : 'Link off'));
     sw.addEventListener('click', async () => {
@@ -193,7 +196,7 @@ export class TeacherApp {
       h('div', null,
         h('button', { class: 'title', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title),
         h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
-        this.whoLine(b)),
+        this.whoLine(b), extra),
       h('div', { class: 'acts' }, sw,
         b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', onclick: () => boardStudentsDialog({ sb: this.sb, board: b, onSaved: async () => { await this.loadAll(); this.renderDashboard(); } }) }, 'Students') : null,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
@@ -258,8 +261,10 @@ export class TeacherApp {
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
     const classesOf = s => this.classes.filter(c => this.students.some(x => x.class_id === c.id && x.student_id === s.id)).map(c => c.name);
     const remove = async s => {
-      const ok = await confirmDialog({ title: `Remove ${s.first_name}?`, text: 'This removes the student from your list, from every class and from every board. Work they already did stays until you delete the board.', confirmLabel: 'Remove', danger: true });
+      const own = this.boards.filter(b => !b.class_id && this.members.get(b.id) && this.members.get(b.id).has(s.id));
+      const ok = await confirmDialog({ title: `Remove ${s.first_name}?`, text: 'This removes the student from your list, from every class and from every board.' + (own.length ? ` Their own page has ${own.length} board${own.length === 1 ? '' : 's'} made only for ${s.first_name}. ${own.length === 1 ? 'It is' : 'They are'} deleted too, with everything ${s.first_name} wrote. This cannot be undone.` : ' Work they already did on class boards stays until you delete the board.'), confirmLabel: own.length ? 'Remove and delete their boards' : 'Remove', danger: true });
       if (!ok) return;
+      try { for (const b of own) await deleteBoard(this.sb, b.id); } catch (e) { return toast(friendlyError(e), 'bad'); }
       const { error } = await this.sb.from('students').delete().eq('id', s.id);
       if (error) return toast(friendlyError(error), 'bad');
       await this.refresh();
@@ -268,7 +273,7 @@ export class TeacherApp {
       h('header', null, h('h2', null, 'All my students')),
       h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Add each student once. Their code never changes. When you make a class or a board, just tick who is in it.'),
       this.master.length ? h('div', { class: 'roster-grid' }, this.master.map((s, i) => { const cl = classesOf(s); return h('div', { class: 'rs-card ' + TILE5[i % 5] },
-        h('b', { class: 'nm' }, s.first_name),
+        h('button', { class: 'nm nm-link', title: `Open ${s.first_name}'s page`, onclick: () => { this.sel = 'stu:' + s.id; this.renderDashboard(); } }, s.first_name),
         h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => this.editCode(s) }, s.code),
         h('button', { class: 'x', 'aria-label': `Remove ${s.first_name}`, onclick: () => remove(s) }, iconEl('close', 16)),
         h('span', { class: 'rs-in' }, cl.length ? 'In: ' + cl.join(', ') : 'Not in a class yet')); }))
@@ -276,6 +281,48 @@ export class TeacherApp {
       this.master.length ? h('div', { class: 'roster-acts' },
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(this.master.map(s => `${s.first_name}: ${s.code}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes')) : null,
       h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
+  }
+
+  // the boards a student sees: made just for them, or boards of their classes that they are part of
+  boardsOfStudent(m) {
+    const inClass = new Set(this.students.filter(x => x.student_id === m.id).map(x => x.class_id));
+    return this.boards.filter(b => {
+      const only = this.members.get(b.id);
+      if (only && only.size) return only.has(m.id) && (!b.class_id || inClass.has(b.class_id));
+      return !!b.class_id && inClass.has(b.class_id);
+    });
+  }
+
+  // one student's own page: their link, and all their work
+  studentPagePanels(m) {
+    const link = studentUrl(m.page_code), teacher = CONFIG.TEACHER_NAME || 'Teacher';
+    const copy = async (text, ok) => toast((await copyText(text)) ? ok : 'Could not copy.', 'ok');
+    const mine = this.boardsOfStudent(m), ids = mine.filter(b => b.mode === 'assignment').map(b => b.id);
+    const slots = new Map();
+    const row = b => { const slot = h('div', { class: 'who-line' }); slots.set(b.id, slot); return this.boardRow(b, b.mode === 'assignment' ? slot : null); };
+    const top = h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, `${m.first_name}'s page`),
+        h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, h('button', { class: 'btn sm', onclick: () => this.editCode(m) }, `Code ${m.code}`))),
+      h('div', { class: 'class-link' },
+        h('p', null, 'Send this link ', h('b', null, 'once'), `. ${m.first_name} types the code and sees all their own work. New work you add here appears there by itself and moves, so it is easy to notice.`),
+        h('div', { class: 'sc-link' }, link),
+        h('div', { class: 'share-actions' },
+          h('button', { class: 'btn primary', onclick: () => copy(studentPageMessage({ name: m.first_name, link, code: m.code, teacher }), `Message for ${m.first_name} copied.`) }, iconEl('copy', 18), `Copy message for ${m.first_name}`),
+          h('button', { class: 'btn', onclick: () => copy(link, 'Link copied.') }, iconEl('link', 18), 'Copy link only'),
+          h('a', { class: 'btn', href: link, target: '_blank', rel: 'noopener' }, `See ${m.first_name}'s page`))));
+    const work = h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, `Work for ${m.first_name}`), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog({ forStudent: m }) }, iconEl('plus', 18), 'Add work')),
+      mine.length ? mine.map(row) : h('div', { class: 'empty' }, h('b', null, 'No work yet. '), `Press Add work, then upload a worksheet or start with a blank page. ${m.first_name} sees it as NEW.`));
+    if (ids.length) this.sb.from('participants').select('board_id,name,submitted_at,score,comment').in('board_id', ids).then(({ data }) => {
+      const mp = new Map((data || []).filter(p => p.name.toLowerCase() === m.first_name.toLowerCase()).map(p => [p.board_id, p]));
+      ids.forEach(id => {
+        const p = mp.get(id), slot = slots.get(id); if (!slot) return;
+        let cls2 = 'new', txt = 'Not started';
+        if (p) { if (p.submitted_at && (p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent. Waiting for you to check'; } else { cls2 = 'working'; txt = 'Working'; } }
+        slot.append(h('button', { class: 'pg-chip ' + cls2, onclick: () => { location.hash = '#/board/' + id; } }, txt));
+      });
+    });
+    return [top, work];
   }
 
   // the students in one class
@@ -334,7 +381,10 @@ export class TeacherApp {
 
   // "For Mia, Ben, Nok" or "Whole class" under a board's title
   whoLine(b) {
-    if (!b.class_id) return null;
+    if (!b.class_id) {
+      const raw = this.members.get(b.id), names = [...(raw || [])].map(id => (this.master.find(s => s.id === id) || {}).first_name).filter(Boolean);
+      return names.length ? h('div', { class: 'who-line' }, h('span', { class: 'tag who' }, 'For ' + names.join(', '))) : null;
+    }
     const inClass = new Set(this.students.filter(s => s.class_id === b.class_id).map(s => s.student_id));
     const total = inClass.size, raw = this.members.get(b.id);
     const ids = raw ? new Set([...raw].filter(id => inClass.has(id))) : null;
@@ -437,13 +487,13 @@ export class TeacherApp {
     try { await deleteBoard(this.sb, b.id); await this.loadAll(); this.renderDashboard(); toast('Board deleted.', 'ok'); } catch (e) { toast(friendlyError(e), 'bad'); }
   }
 
-  newBoardDialog() {
+  newBoardDialog({ forStudent = null } = {}) {
     const title = h('input', { class: 'input', id: 'bt', placeholder: 'Example: Fractions worksheet 4', maxlength: '120' });
-    if (!this.classes.length) {
+    if (!forStudent && !this.classes.length) {
       const m0 = modal({ title: 'Make a class first', body: h('p', null, 'Boards belong to a class so that every student finds their own boards on one page. Make a class and add your students first, then add boards.'), actions: [h('button', { class: 'btn', onclick: () => m0.close() }, 'Close'), h('button', { class: 'btn primary', onclick: () => { m0.close(); this.newClassDialog(); } }, 'Make a class')] });
       return;
     }
-    const clsSel = h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
+    const clsSel = forStudent ? { value: '' } : h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
     const form = sourceForm({ defaultSource: 'pdf' });
     // who is this board for: the students of the chosen class, all ticked to begin with
     const whoBox = h('div', { class: 'field' });
@@ -453,7 +503,7 @@ export class TeacherApp {
       who = checklist(mem, mem.map(x => x.id), { empty: 'This class has no students yet. Add students to the class first (the board will be open to everyone who joins later).' });
       whoBox.replaceChildren(h('span', { class: 'label' }, 'Who is this board for?'), h('span', { class: 'hint' }, 'Untick students who do not learn this topic. Only the ticked students see it.'), who.el);
     };
-    clsSel.addEventListener('change', drawWho); drawWho();
+    if (!forStudent) { clsSel.addEventListener('change', drawWho); drawWho(); }
     let mode = 'live';
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
     const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Opens at (optional)'), startIn), h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
@@ -470,10 +520,10 @@ export class TeacherApp {
     const err = h('p', { class: 'error', role: 'alert' });
     const go = h('button', { class: 'btn primary' }, 'Create board');
     const m = modal({
-      title: 'New board',
+      title: forStudent ? `New work for ${forStudent.first_name}` : 'New board',
       body: h('div', null,
-        h('div', { class: 'field' }, h('label', { for: 'bt' }, 'Board name'), title),
-        h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox,
+        h('div', { class: 'field' }, h('label', { for: 'bt' }, forStudent ? 'Name of the work' : 'Board name'), title),
+        forStudent ? h('p', { class: 'hint', style: { marginBottom: '10px' } }, `Only ${forStudent.first_name} sees this. It appears on their page as NEW.`) : [h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox],
         h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), dates,
         form.el, bar, msg, err),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
@@ -481,13 +531,17 @@ export class TeacherApp {
     go.addEventListener('click', async () => {
       err.textContent = '';
       if (!title.value.trim()) { err.textContent = 'Give the board a name.'; title.focus(); return; }
-      const tot = this.students.filter(s => s.class_id === clsSel.value && s.student_id).length;
+      const tot = forStudent ? 0 : this.students.filter(s => s.class_id === clsSel.value && s.student_id).length;
       if (tot && !who.size()) { err.textContent = 'Tick at least one student for this board.'; return; }
       go.disabled = true; bar.hidden = false;
       try {
         const s0 = startIn.value ? new Date(startIn.value).toISOString() : null, d0 = dueIn.value ? new Date(dueIn.value).toISOString() : null;
         if (mode === 'assignment' && s0 && d0 && new Date(d0) <= new Date(s0)) throw new Error('The due time must be after the start time.');
-        const b = await createBoard(this.sb, { title: title.value.trim(), classId: clsSel.value, spec: form.spec(), mode, startsAt: mode === 'assignment' ? s0 : null, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
+        const b = await createBoard(this.sb, { title: title.value.trim(), classId: forStudent ? null : clsSel.value, spec: form.spec(), mode, startsAt: mode === 'assignment' ? s0 : null, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
+        if (forStudent) {
+          const { error } = await this.sb.from('board_students').insert({ board_id: b.id, student_id: forStudent.id });
+          if (error) { await deleteBoard(this.sb, b.id).catch(() => {}); throw error; }
+        }
         if (tot && who.size() < tot) {
           const { error } = await this.sb.from('board_students').insert(who.ids().map(id => ({ board_id: b.id, student_id: id })));
           if (error) toast('The board was made, but the student list was not saved. Press Students on the board to choose again.', 'bad');
