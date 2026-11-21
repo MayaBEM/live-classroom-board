@@ -7,6 +7,10 @@ import { Store } from './store.js';
 import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
+import { boardStudentsDialog, checklist } from './members.js';
+
+const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
+const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
 
 export const brand = (big = false) => h('a', { class: 'brand' + (big ? ' big stack' : ''), href: BASE, 'aria-label': 'Bright EngMath' },
   h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' }));
@@ -36,6 +40,7 @@ export class TeacherApp {
   constructor(root) {
     this.root = root; this.sb = makeClient('teacher');
     this.sel = 'all'; this.classes = []; this.boards = []; this.students = [];
+    this.master = []; this.members = new Map();   // master = the one list of students; members = board id -> set of student ids
     this.view = null;
   }
 
@@ -105,15 +110,19 @@ export class TeacherApp {
 
   // ----------------------------------------------------------------- dashboard
   async loadAll() {
-    const [c, b, s] = await Promise.all([
+    const [c, b, s, ms, bm] = await Promise.all([
       this.sb.from('classes').select('*').order('name'),
       this.sb.from('boards').select('*, pages(count), classes(name)').order('created_at', { ascending: false }),
       this.sb.from('class_students').select('*').order('first_name'),
+      this.sb.from('students').select('*').order('first_name'),
+      this.sb.from('board_students').select('board_id,student_id'),
     ]);
-    const err = c.error || b.error || s.error;
+    const err = c.error || b.error || s.error || ms.error || bm.error;
     if (err) throw err;
-    this.classes = c.data; this.boards = b.data; this.students = s.data;
-    if (this.sel !== 'all' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
+    this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
+    this.members = new Map();
+    (bm.data || []).forEach(r => { if (!this.members.has(r.board_id)) this.members.set(r.board_id, new Set()); this.members.get(r.board_id).add(r.student_id); });
+    if (this.sel !== 'all' && this.sel !== 'students' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
   }
 
   async showDashboard() {
@@ -131,10 +140,20 @@ export class TeacherApp {
       const n = this.boards.filter(b => b.class_id === c.id).length;
       tabs.push(h('button', { class: 'tab c' + (ci % 5 + 1), 'aria-current': String(this.sel === c.id), onclick: () => { this.sel = c.id; this.renderDashboard(); } }, c.name, h('span', { class: 'n' }, n)));
     });
-    const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' }, h('h2', null, 'Classes'), tabs,
+    const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' },
+      h('h2', null, 'My students'),
+      h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
+      h('h2', { style: { marginTop: '14px' } }, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
 
     const main = h('main', { class: 'dash-main' });
+    if (this.sel === 'students') {
+      main.append(this.studentsPanel());
+      this.root.replaceChildren(h('div', { class: 'dash' },
+        h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
+        h('div', { class: 'dash-body' }, side, main)));
+      return;
+    }
     const cls = this.classes.find(c => c.id === this.sel);
     const list = this.boards.filter(b => this.sel === 'all' || b.class_id === this.sel);
     if (!this.classes.length) {
@@ -142,7 +161,7 @@ export class TeacherApp {
         h('header', null, h('h2', null, 'Start here')),
         h('ol', { class: 'start-steps' },
           h('li', null, h('span', { class: 'n n1' }, '1'), h('div', null, h('b', null, 'Make a class'), h('p', { class: 'hint' }, 'One class for each group you teach, like "Grade 4 Math".'))),
-          h('li', null, h('span', { class: 'n n2' }, '2'), h('div', null, h('b', null, 'Add your students'), h('p', { class: 'hint' }, 'Type first names. Each student gets their own 4-number code.'))),
+          h('li', null, h('span', { class: 'n n2' }, '2'), h('div', null, h('b', null, 'Add your students'), h('p', { class: 'hint' }, 'Tick students from your list, or type new first names. Each student keeps the same 4-number code in every class.'))),
           h('li', null, h('span', { class: 'n n3' }, '3'), h('div', null, h('b', null, 'Add boards to the class'), h('p', { class: 'hint' }, 'Every student sees their own copy of each board on one class page.')))),
         h('div', { style: { padding: '0 18px 18px' } }, h('button', { class: 'btn primary', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'Make my first class'))));
     }
@@ -152,7 +171,7 @@ export class TeacherApp {
     if (this.classes.length || list.length) {
       main.append(h('section', { class: 'sheet-panel' },
         h('header', null, h('h2', null, cls ? 'Step 2: boards in this class' : 'All boards'), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog() }, iconEl('plus', 18), 'New board')),
-        list.length ? list.map(b => this.boardRow(b)) : h('div', { class: 'empty' }, h('b', null, 'No boards yet. '), cls && !this.students.some(s => s.class_id === cls.id) ? 'Add your students above first, then press New board.' : 'Press New board, then upload a PDF or start with a blank page. Students find it on their class page.')));
+        list.length ? list.map(b => this.boardRow(b)) : h('div', { class: 'empty' }, h('b', null, 'No boards yet. '), cls && !this.students.some(s => s.class_id === cls.id) ? 'Add your students above first, then press New board and tick who it is for.' : 'Press New board, then upload a PDF or start with a blank page. Students find it on their class page.')));
       if (cls) { const pp = this.progressPanel(cls); if (pp) main.append(pp); }
     }
 
@@ -173,71 +192,156 @@ export class TeacherApp {
     return h('div', { class: 'board-row' + (b.mode === 'assignment' ? ' assign' : '') },
       h('div', null,
         h('button', { class: 'title', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title),
-        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })))),
+        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
+        this.whoLine(b)),
       h('div', { class: 'acts' }, sw,
+        b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', onclick: () => boardStudentsDialog({ sb: this.sb, board: b, onSaved: async () => { await this.loadAll(); this.renderDashboard(); } }) }, 'Students') : null,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
         h('button', { class: 'btn sm primary', onclick: () => { location.hash = '#/board/' + b.id; } }, 'Open'),
         h('button', { class: 'btn sm danger', 'aria-label': `Delete ${b.title}`, onclick: () => this.deleteBoardDialog(b) }, iconEl('trash', 18))));
   }
 
-  classPanel(cls) {
-    const mine = this.students.filter(s => s.class_id === cls.id);
+  // ----------------------------------------------------------------- students: one list, fixed codes
+  async refresh() { await this.loadAll(); this.renderDashboard(); }
+
+  // make sure every typed name is on the master list (a new name gets a new, never-used code); returns the student rows
+  async ensureStudents(names) {
+    const have = new Map(this.master.map(s => [s.first_name.toLowerCase(), s]));
+    const out = [], fresh = names.filter(n => !have.has(n.toLowerCase()));
+    names.forEach(n => { if (have.has(n.toLowerCase())) out.push(have.get(n.toLowerCase())); });
+    if (fresh.length) {
+      const codes = makeCodes(fresh.length, new Set(this.master.map(s => s.code)));
+      const { data, error } = await this.sb.from('students').insert(fresh.map((n, i) => ({ first_name: n, code: codes[i] }))).select();
+      if (error) throw error;
+      out.push(...data); this.master = [...this.master, ...data];
+    }
+    return out;
+  }
+
+  // put students of the list into a class (a student already in it is skipped)
+  async addToClass(cls, studentIds) {
+    const inClass = new Set(this.students.filter(s => s.class_id === cls.id).map(s => s.student_id));
+    const rows = studentIds.filter(id => !inClass.has(id)).map(id => this.master.find(s => s.id === id)).filter(Boolean)
+      .map(s => ({ class_id: cls.id, student_id: s.id, first_name: s.first_name, code: s.code }));
+    if (!rows.length) return 0;
+    const { error } = await this.sb.from('class_students').insert(rows);
+    if (error) throw error;
+    return rows.length;
+  }
+
+  editCode(s) {
+    const inp = h('input', { class: 'input big', id: 'ec', value: s.code || '', inputmode: 'numeric', maxlength: '4', style: { letterSpacing: '.3em', textAlign: 'center', width: '200px' } });
+    inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, '').slice(0, 4); });
+    const err = h('p', { class: 'error', role: 'alert' });
+    const save = async v => {
+      if (!/^\d{4}$/.test(v)) { err.textContent = 'A code is 4 numbers.'; return; }
+      if (this.master.some(o => o.id !== s.id && o.code === v)) { err.textContent = 'Another student already has this code. Pick a different one.'; return; }
+      const { error } = await this.sb.from('students').update({ code: v }).eq('id', s.id);
+      if (error) { err.textContent = friendlyError(error); return; }
+      m.close(); await this.refresh();
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(inp.value); });
+    const m = modal({ title: `${s.first_name}: code`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'This code stays the same in every class and on every board.'), h('div', { class: 'field' }, h('label', { for: 'ec' }, '4-number code'), inp), err),
+      actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn', onclick: () => save(makeCodes(1, new Set(this.master.map(o => o.code)))[0]) }, 'Random code'), h('button', { class: 'btn primary', onclick: () => save(inp.value) }, 'Save')] });
+  }
+
+  // the one list of all my students
+  studentsPanel() {
     const input = h('input', { class: 'input', placeholder: 'First names, like: Mia, Ben, Nok', 'aria-label': 'Add student first names' });
-    const taken = () => new Set(mine.map(s => s.code).filter(Boolean));
-    const refresh = async () => { await this.loadAll(); this.renderDashboard(); };
     const add = async () => {
-      const have = new Set(mine.map(s => s.first_name.toLowerCase()));
-      const names = [...new Set(input.value.split(/[,\n;]+/).map(s => s.trim().slice(0, 24)).filter(Boolean))].filter(n => !have.has(n.toLowerCase()));
-      if (!names.length) { toast('Type new first names, separated by commas.'); return; }
-      const codes = makeCodes(names.length, taken());
-      const { error } = await this.sb.from('class_students').insert(names.map((n, i) => ({ class_id: cls.id, first_name: n, code: codes[i] })));
-      if (error) return toast(friendlyError(error), 'bad');
-      input.value = ''; toast(`${names.length} student${names.length === 1 ? '' : 's'} added, each with a 4-number code.`, 'ok'); await refresh();
-    };
-    const fillMissing = async () => {
-      const miss = mine.filter(s => !s.code), codes = makeCodes(miss.length, taken());
-      for (let i = 0; i < miss.length; i++) await this.sb.from('class_students').update({ code: codes[i] }).eq('id', miss[i].id);
-      await refresh();
-    };
-    const renewAll = async () => {
-      const ok = await confirmDialog({ title: 'Make new codes for everyone?', text: 'Every student gets a new 4-number code. Students who already opened their work on a device keep their access there, but the old codes stop working on other devices.', confirmLabel: 'Make new codes' });
-      if (!ok) return;
-      const codes = makeCodes(mine.length);
-      for (let i = 0; i < mine.length; i++) await this.sb.from('class_students').update({ code: codes[i] }).eq('id', mine[i].id);
-      await refresh();
-    };
-    const editCode = s => {
-      const inp = h('input', { class: 'input big', id: 'ec', value: s.code || '', inputmode: 'numeric', maxlength: '4', style: { letterSpacing: '.3em', textAlign: 'center', width: '200px' } });
-      inp.addEventListener('input', () => { inp.value = inp.value.replace(/\D/g, '').slice(0, 4); });
-      const err = h('p', { class: 'error', role: 'alert' });
-      const save = async (v) => {
-        if (!/^\d{4}$/.test(v)) { err.textContent = 'A code is 4 numbers.'; return; }
-        if (mine.some(o => o.id !== s.id && o.code === v)) { err.textContent = 'Another student already has this code. Pick a different one.'; return; }
-        const { error } = await this.sb.from('class_students').update({ code: v }).eq('id', s.id);
-        if (error) { err.textContent = friendlyError(error); return; }
-        m.close(); await refresh();
-      };
-      const m = modal({ title: `${s.first_name}: code`, body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'ec' }, '4-number code'), inp), err),
-        actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn', onclick: () => save(makeCodes(1, taken())[0]) }, 'Random code'), h('button', { class: 'btn primary', onclick: () => save(inp.value) }, 'Save')] });
+      const names = cleanNames(input.value), have = new Set(this.master.map(s => s.first_name.toLowerCase())), fresh = names.filter(n => !have.has(n.toLowerCase()));
+      if (!names.length) { toast('Type first names, separated by commas.'); return; }
+      if (!fresh.length) { toast('Those students are already on your list.'); return; }
+      try { await this.ensureStudents(fresh); } catch (e) { return toast(friendlyError(e), 'bad'); }
+      input.value = ''; toast(`${fresh.length} student${fresh.length === 1 ? '' : 's'} added, each with a code that never changes.`, 'ok'); await this.refresh();
     };
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
-    const missing = mine.filter(s => !s.code).length;
-    const COL = ['c1', 'c2', 'c3', 'c4', 'c5'];
+    const classesOf = s => this.classes.filter(c => this.students.some(x => x.class_id === c.id && x.student_id === s.id)).map(c => c.name);
+    const remove = async s => {
+      const ok = await confirmDialog({ title: `Remove ${s.first_name}?`, text: 'This removes the student from your list, from every class and from every board. Work they already did stays until you delete the board.', confirmLabel: 'Remove', danger: true });
+      if (!ok) return;
+      const { error } = await this.sb.from('students').delete().eq('id', s.id);
+      if (error) return toast(friendlyError(error), 'bad');
+      await this.refresh();
+    };
+    return h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, 'All my students')),
+      h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Add each student once. Their code never changes. When you make a class or a board, just tick who is in it.'),
+      this.master.length ? h('div', { class: 'roster-grid' }, this.master.map((s, i) => { const cl = classesOf(s); return h('div', { class: 'rs-card ' + TILE5[i % 5] },
+        h('b', { class: 'nm' }, s.first_name),
+        h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => this.editCode(s) }, s.code),
+        h('button', { class: 'x', 'aria-label': `Remove ${s.first_name}`, onclick: () => remove(s) }, iconEl('close', 16)),
+        h('span', { class: 'rs-in' }, cl.length ? 'In: ' + cl.join(', ') : 'Not in a class yet')); }))
+        : h('p', { class: 'empty' }, h('b', null, 'No students yet. '), 'Type first names below. Each student gets a 4-number code that stays the same for every class.'),
+      this.master.length ? h('div', { class: 'roster-acts' },
+        h('button', { class: 'btn sm', onclick: async () => toast((await copyText(this.master.map(s => `${s.first_name}: ${s.code}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes')) : null,
+      h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
+  }
+
+  // the students in one class
+  classPanel(cls) {
+    const mine = this.students.filter(s => s.class_id === cls.id);
+    const input = h('input', { class: 'input', placeholder: 'New first names, like: Mia, Ben, Nok', 'aria-label': 'Add new student first names' });
+    const add = async () => {
+      const names = cleanNames(input.value);
+      if (!names.length) { toast('Type first names, separated by commas.'); return; }
+      try { const rows = await this.ensureStudents(names); const n = await this.addToClass(cls, rows.map(r => r.id)); input.value = ''; toast(n ? `${n} student${n === 1 ? '' : 's'} added to ${cls.name}.` : 'They are already in this class.', 'ok'); await this.refresh(); }
+      catch (e) { toast(friendlyError(e), 'bad'); }
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    const removeFromClass = async s => {
+      const ok = await confirmDialog({ title: `Take ${s.first_name} out of ${cls.name}?`, text: 'They stay on your list of students with the same code. They no longer see the boards of this class. Work they already did stays until you delete the board.', confirmLabel: 'Take out', danger: true });
+      if (!ok) return;
+      const ids = this.boards.filter(b => b.class_id === cls.id).map(b => b.id);
+      if (ids.length && s.student_id) await this.sb.from('board_students').delete().eq('student_id', s.student_id).in('board_id', ids);
+      const { error } = await this.sb.from('class_students').delete().eq('id', s.id);
+      if (error) return toast(friendlyError(error), 'bad');
+      await this.refresh();
+    };
+    const pick = () => {
+      const inClass = new Set(mine.map(s => s.student_id));
+      const cand = this.master.filter(s => !inClass.has(s.id));
+      const list = checklist(cand, [], { empty: this.master.length ? 'Everyone on your list is already in this class.' : 'Your list is empty. Type new names below.' });
+      const names = h('input', { class: 'input', placeholder: 'Or type new first names', 'aria-label': 'New first names' });
+      const err = h('p', { class: 'error', role: 'alert' });
+      const go = async () => {
+        err.textContent = '';
+        try {
+          const fresh = cleanNames(names.value), rows = fresh.length ? await this.ensureStudents(fresh) : [];
+          const n = await this.addToClass(cls, [...list.ids(), ...rows.map(r => r.id)]);
+          if (!n) { err.textContent = 'Tick at least one student, or type a new name.'; return; }
+          m.close(); toast(`${n} student${n === 1 ? '' : 's'} added to ${cls.name}.`, 'ok'); await this.refresh();
+        } catch (e) { err.textContent = friendlyError(e); }
+      };
+      const m = modal({ title: `Add students to ${cls.name}`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Tick students from your list. Their codes stay the same.'), list.el, h('div', { class: 'field', style: { marginTop: '14px' } }, h('label', null, 'New student'), names), err),
+        actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: go }, 'Add to class')] });
+    };
     return h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `Step 1: students in ${cls.name}`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+          h('button', { class: 'btn sm primary', onclick: pick }, iconEl('plus', 18), 'Add students from my list'),
           h('button', { class: 'btn sm', onclick: () => this.renameClass(cls) }, 'Rename class'),
           h('button', { class: 'btn sm danger', onclick: () => this.deleteClassDialog(cls) }, iconEl('trash', 18), 'Delete class'))),
-      mine.length ? h('div', { class: 'roster-grid' }, mine.map((s, i) => h('div', { class: 'rs-card ' + COL[i % COL.length] },
+      mine.length ? h('div', { class: 'roster-grid' }, mine.map((s, i) => { const ms = this.master.find(x => x.id === s.student_id); return h('div', { class: 'rs-card ' + TILE5[i % 5] },
         h('b', { class: 'nm' }, s.first_name),
-        s.code ? h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => editCode(s) }, s.code) : h('button', { class: 'btn sm', onclick: () => editCode(s) }, 'Make code'),
-        h('button', { class: 'x', 'aria-label': `Remove ${s.first_name}`, onclick: async () => { const ok = await confirmDialog({ title: `Remove ${s.first_name}?`, text: 'This removes the name from the class list. Work they already did on boards stays until you delete it.', confirmLabel: 'Remove', danger: true }); if (!ok) return; const { error } = await this.sb.from('class_students').delete().eq('id', s.id); if (error) return toast(friendlyError(error), 'bad'); await refresh(); } }, iconEl('close', 16)))))
-        : h('p', { class: 'empty' }, h('b', null, 'No students yet. '), 'Type first names below. Each student gets a 4-number code. On a board of this class, students tap their own name and type their code, so nobody can open another student\'s work.'),
+        ms ? h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => this.editCode(ms) }, s.code) : h('span', { class: 'code' }, s.code || '-'),
+        h('button', { class: 'x', 'aria-label': `Take ${s.first_name} out of this class`, onclick: () => removeFromClass(s) }, iconEl('close', 16))); }))
+        : h('p', { class: 'empty' }, h('b', null, 'No students in this class yet. '), 'Press "Add students from my list" and tick who learns here. Each student keeps the same code in every class.'),
       mine.length ? h('div', { class: 'roster-acts' },
-        missing ? h('button', { class: 'btn sm primary', onclick: fillMissing }, `Make codes for ${missing}`) : null,
-        h('button', { class: 'btn sm', onclick: async () => toast((await copyText(mine.map(s => `${s.first_name}: ${s.code || '-'}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes'),
-        h('button', { class: 'btn sm', onclick: renewAll }, 'New codes for everyone')) : null,
-      h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
+        h('button', { class: 'btn sm', onclick: async () => toast((await copyText(mine.map(s => `${s.first_name}: ${s.code || '-'}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes')) : null,
+      h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add new names')));
+  }
+
+  // "For Mia, Ben, Nok" or "Whole class" under a board's title
+  whoLine(b) {
+    if (!b.class_id) return null;
+    const inClass = new Set(this.students.filter(s => s.class_id === b.class_id).map(s => s.student_id));
+    const total = inClass.size, raw = this.members.get(b.id);
+    const ids = raw ? new Set([...raw].filter(id => inClass.has(id))) : null;
+    if (raw && raw.size && !ids.size) return h('div', { class: 'who-line' }, h('span', { class: 'tag who' }, 'Nobody'), h('span', null, 'Press Students to choose who this board is for'));
+    if (!ids || !ids.size) return h('div', { class: 'who-line' }, h('span', { class: 'tag who' }, 'Whole class'), h('span', null, total ? `${total} student${total === 1 ? '' : 's'}` : 'No students in the class yet'));
+    const names = [...ids].map(id => (this.master.find(s => s.id === id) || {}).first_name).filter(Boolean).sort((a, c) => a.localeCompare(c));
+    return h('div', { class: 'who-line' }, h('span', { class: 'tag who' }, `For ${names.length} of ${total}`), h('span', { title: names.join(', ') }, names.slice(0, 5).join(', ') + (names.length > 5 ? ` +${names.length - 5}` : '')));
   }
 
   classLinkPanel(cls) {
@@ -268,6 +372,8 @@ export class TeacherApp {
       if (error) { host.replaceChildren(h('p', { class: 'empty' }, friendlyError(error))); return; }
       const key = (b, n) => b + '|' + n.toLowerCase(), by = new Map((data || []).map(p => [key(p.board_id, p.name), p]));
       const cell = (b, s) => {
+        const only = this.members.get(b.id);
+        if (only && only.size && !only.has(s.student_id)) return h('td', null, h('span', { class: 'pg-na', title: `${s.first_name} is not in this board` }, '–'));
         const p = by.get(key(b.id, s.first_name));
         let cls2 = 'new', txt = 'Not started';
         if (p) { if (p.submitted_at && (p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent'; } else { cls2 = 'working'; txt = 'Working'; } }
@@ -283,16 +389,27 @@ export class TeacherApp {
   newClassDialog() {
     const name = h('input', { class: 'input', id: 'cn', placeholder: 'Example: Grade 4 Math, Tuesday', maxlength: '80' });
     const err = h('p', { class: 'error', role: 'alert' });
+    const list = checklist(this.master, [], { empty: 'Your list of students is empty. Type new names below.' });
+    const names = h('input', { class: 'input', id: 'cnn', placeholder: 'Or type new first names, like: Mia, Ben', 'aria-label': 'New first names' });
     const save = async () => {
-      if (!name.value.trim()) { err.textContent = 'Give the class a name.'; return; }
+      if (!name.value.trim()) { err.textContent = 'Give the class a name.'; name.focus(); return; }
+      go.disabled = true;
       let data = null, error = null;
       for (let i = 0; i < 6 && !data; i++) { const r = await this.sb.from('classes').insert({ name: name.value.trim(), code: makeCode(6) }).select().single(); if (!r.error) data = r.data; else if (r.error.code !== '23505') { error = r.error; break; } }
       if (!data && !error) error = new Error('Could not make a class code. Try again.');
-      if (error) { err.textContent = friendlyError(error); return; }
+      if (error) { err.textContent = friendlyError(error); go.disabled = false; return; }
+      try {
+        const fresh = cleanNames(names.value), rows = fresh.length ? await this.ensureStudents(fresh) : [];
+        this.students = this.students.filter(s => s.class_id !== data.id);
+        await this.addToClass(data, [...list.ids(), ...rows.map(r => r.id)]);
+      } catch (e) { toast(friendlyError(e), 'bad'); }
       m.close(); this.sel = data.id; await this.loadAll(); this.renderDashboard();
     };
     name.addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
-    const m = modal({ title: 'New class', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'cn' }, 'Class name'), name), err), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: save }, 'Create class')] });
+    const go = h('button', { class: 'btn primary', onclick: save }, 'Create class');
+    const m = modal({ title: 'New class', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'cn' }, 'Class name'), name),
+      h('div', { class: 'field' }, h('span', { class: 'label' }, 'Who is in this class?'), h('span', { class: 'hint' }, 'Tick students from your list. Their codes stay the same.'), list.el), h('div', { class: 'field' }, h('label', { for: 'cnn' }, 'New student'), names), err),
+      actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go], wide: true });
   }
 
   renameClass(cls) {
@@ -328,6 +445,15 @@ export class TeacherApp {
     }
     const clsSel = h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
     const form = sourceForm({ defaultSource: 'pdf' });
+    // who is this board for: the students of the chosen class, all ticked to begin with
+    const whoBox = h('div', { class: 'field' });
+    let who = null;
+    const drawWho = () => {
+      const mem = this.students.filter(s => s.class_id === clsSel.value && s.student_id).map(s => ({ id: s.student_id, first_name: s.first_name, code: s.code }));
+      who = checklist(mem, mem.map(x => x.id), { empty: 'This class has no students yet. Add students to the class first (the board will be open to everyone who joins later).' });
+      whoBox.replaceChildren(h('span', { class: 'label' }, 'Who is this board for?'), h('span', { class: 'hint' }, 'Untick students who do not learn this topic. Only the ticked students see it.'), who.el);
+    };
+    clsSel.addEventListener('change', drawWho); drawWho();
     let mode = 'live';
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
     const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Opens at (optional)'), startIn), h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
@@ -347,7 +473,7 @@ export class TeacherApp {
       title: 'New board',
       body: h('div', null,
         h('div', { class: 'field' }, h('label', { for: 'bt' }, 'Board name'), title),
-        h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel),
+        h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox,
         h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), dates,
         form.el, bar, msg, err),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
@@ -355,11 +481,17 @@ export class TeacherApp {
     go.addEventListener('click', async () => {
       err.textContent = '';
       if (!title.value.trim()) { err.textContent = 'Give the board a name.'; title.focus(); return; }
+      const tot = this.students.filter(s => s.class_id === clsSel.value && s.student_id).length;
+      if (tot && !who.size()) { err.textContent = 'Tick at least one student for this board.'; return; }
       go.disabled = true; bar.hidden = false;
       try {
         const s0 = startIn.value ? new Date(startIn.value).toISOString() : null, d0 = dueIn.value ? new Date(dueIn.value).toISOString() : null;
         if (mode === 'assignment' && s0 && d0 && new Date(d0) <= new Date(s0)) throw new Error('The due time must be after the start time.');
         const b = await createBoard(this.sb, { title: title.value.trim(), classId: clsSel.value, spec: form.spec(), mode, startsAt: mode === 'assignment' ? s0 : null, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
+        if (tot && who.size() < tot) {
+          const { error } = await this.sb.from('board_students').insert(who.ids().map(id => ({ board_id: b.id, student_id: id })));
+          if (error) toast('The board was made, but the student list was not saved. Press Students on the board to choose again.', 'bad');
+        }
         m.close(); location.hash = '#/board/' + b.id;
       } catch (e) { console.error(e); err.textContent = friendlyError(e); go.disabled = false; bar.hidden = true; }
     });

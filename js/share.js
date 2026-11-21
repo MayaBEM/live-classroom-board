@@ -3,6 +3,7 @@ import { h, modal, toast, copyText, joinUrl, classUrl, shareMessage, classShareM
 import { iconEl } from './icons.js';
 import { friendlyError } from './db.js';
 import { CONFIG } from '../config.js';
+import { boardRoster, boardStudentsDialog } from './members.js';
 
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
 
@@ -10,8 +11,7 @@ export async function shareDialog({ sb, store }) {
   const b = store.board, link = joinUrl(b.code), teacher = CONFIG.TEACHER_NAME || 'Teacher';
   let roster = [], cls = null;
   if (b.class_id) {
-    const { data } = await sb.from('class_students').select('first_name,code').eq('class_id', b.class_id).order('first_name');
-    roster = (data || []).filter(r => r.code);
+    roster = (await boardRoster(sb, b)).filter(r => r.code);
     const c = await sb.from('classes').select('name,code').eq('id', b.class_id).maybeSingle();
     cls = c.data;
   }
@@ -48,6 +48,7 @@ export async function shareDialog({ sb, store }) {
   if (roster.length) {
     parts.push(h('h3', { class: 'share-h' }, 'Each student has their own code'),
       h('p', { class: 'hint' }, 'A student taps their name and types their code. Nobody can open another student\'s work.'),
+      h('button', { class: 'btn sm', style: { marginBottom: '10px' }, onclick: () => { dlg.close(); boardStudentsDialog({ sb, board: b, onSaved: () => shareDialog({ sb, store }) }); } }, 'Change who this board is for'),
       h('div', { class: 'code-list' }, roster.map((r, i) => h('div', { class: 'code-row ' + TILE[i % TILE.length] },
         h('span', { class: 'nm' }, r.first_name), h('b', { class: 'cd' }, r.code),
         h('button', { class: 'btn sm', onclick: () => copy(shareMessage({ title: b.title, link, teacher, name: r.first_name, code: r.code }), `Message for ${r.first_name} copied.`) }, iconEl('copy', 16), 'Copy')))),
@@ -57,5 +58,5 @@ export async function shareDialog({ sb, store }) {
       h('p', { class: 'hint', style: { marginTop: '10px' } }, `Without a student list, students type their first name. Class code: ${b.code}`));
   }
   parts.push(h('div', { style: { marginTop: '16px' } }, sw));
-  modal({ title: 'Send to your students', body: h('div', null, ...parts.filter(Boolean)), wide: true });
+  const dlg = modal({ title: 'Send to your students', body: h('div', null, ...parts.filter(Boolean)), wide: true });
 }

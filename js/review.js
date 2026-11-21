@@ -8,6 +8,7 @@ import { exportDialog } from './export.js';
 import { openAddPages } from './pages.js';
 import { TimerController } from './timer.js';
 import { shareDialog } from './share.js';
+import { boardRoster, boardStudentsDialog } from './members.js';
 
 const ONLINE_MS = 75000;
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -24,10 +25,7 @@ export class ReviewView {
   async start() {
     const st = this.store;
     try {
-      if (st.board.class_id) {
-        const { data } = await this.sb.from('class_students').select('first_name').eq('class_id', st.board.class_id);
-        this.roster = (data || []).map(r => r.first_name);
-      }
+      if (st.board.class_id) this.roster = (await boardRoster(this.sb, st.board)).map(r => r.first_name);
     } catch (e) { /* roster is optional */ }
     this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: true });
     this.unsubs = [
@@ -84,6 +82,7 @@ export class ReviewView {
         h('button', { class: 'btn sm' + (b.locked ? ' on' : ''), onclick: () => this.toggleLock() }, iconEl(b.locked ? 'lock' : 'unlock', 18), b.locked ? 'Writing locked' : 'Lock writing'),
         h('button', { class: 'btn sm', title: 'Class timer', 'aria-label': 'Class timer', onclick: () => this.timerCtl.dialog() }, iconEl('timer', 18), h('span', { class: 'rv-lbl' }, 'Timer')),
         h('button', { class: 'btn sm', title: 'Start and due time', 'aria-label': 'Start and due time', onclick: () => this.datesDialog() }, iconEl('file', 18), h('span', { class: 'rv-lbl' }, 'Dates')),
+        b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', 'aria-label': 'Students of this board', onclick: () => this.studentsDialog() }, iconEl('plus', 18), h('span', { class: 'rv-lbl' }, 'Students')) : null,
         h('button', { class: 'btn sm', title: 'Share with students', 'aria-label': 'Share with students', onclick: () => this.shareDialog() }, iconEl('share', 18), h('span', { class: 'rv-lbl' }, 'Share')),
         h('button', { class: 'btn sm', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), h('span', { class: 'rv-lbl' }, 'Add pages')),
         h('button', { class: 'btn sm primary', onclick: () => this.exportClass() }, iconEl('file', 18), 'Export class PDF')));
@@ -229,6 +228,12 @@ export class ReviewView {
     if (error) { b.locked = !val; this.renderHeader(); toast(friendlyError(error), 'bad'); } else toast(val ? 'Everyone is locked out of writing.' : 'Students can write again.');
   }
 
+  studentsDialog() {
+    return boardStudentsDialog({ sb: this.sb, board: this.store.board, onSaved: async () => {
+      try { this.roster = (await boardRoster(this.sb, this.store.board)).map(r => r.first_name); } catch (e) { /* keep the old list */ }
+      this.onPeople(true);
+    } });
+  }
   shareDialog() { return shareDialog({ sb: this.sb, store: this.store }); }
 
   datesDialog() {

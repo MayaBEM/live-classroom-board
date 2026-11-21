@@ -624,3 +624,19 @@ table.prog thead th { font-size: 13px; color: var(--ink-2); max-width: 160px; ov
 .pg-chip.working { background: #FFF1B8; border-color: #EBD08A; color: #6B5200; }
 .pg-chip.sent { background: var(--ink); border-color: var(--ink); color: #fff; }
 .pg-chip.checked { background: var(--mint); border-color: #5CB982; color: var(--ink); font-weight: 600; }
+
+/* ---- one list of students: picking who is in a class or a board */
+.tab.stu { border-left-color: transparent; }
+.pick-wrap { display: grid; gap: 8px; }
+.pick-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pick-count { margin-left: auto; font-size: 14px; color: var(--ink-2); }
+.pick-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 8px; max-height: min(42vh, 340px); overflow: auto; padding: 2px; }
+.pick { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 12px; border: 1px solid rgba(0,0,0,.22); background: var(--tile, var(--sun)); cursor: pointer; }
+.pick input { width: 24px; height: 24px; accent-color: var(--ink); flex: none; margin: 0; }
+.pick .nm { font-weight: 600; font-size: 17px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pick .cd { font-size: 15px; letter-spacing: .12em; background: #fff; border: 1px solid rgba(0,0,0,.3); padding: 0 8px; }
+.pick:has(input:not(:checked)) { background: #fff; color: var(--ink-2); }
+.rs-card .rs-in { grid-column: 1 / -1; font-size: 13px; color: var(--ink-2); }
+.who-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 14px; color: var(--ink-2); }
+.tag.who { background: #fff; border: 1px solid rgba(0,0,0,.3); color: var(--ink); }
+.pg-na { color: var(--ink-2); padding: 0 12px; }

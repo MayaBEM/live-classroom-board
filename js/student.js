@@ -18,6 +18,7 @@ const MESSAGES = {
   NAME_TAKEN_ASSIGNMENT: 'Your work is saved under this name on another device. Type your 4-number PIN, or ask your teacher to let you back in.',
   NOT_STARTED: 'This assignment is not open yet.',
   NOT_ON_LIST: 'That name is not on the list. Ask your teacher.',
+  NOT_IN_BOARD: 'This board is not for you. Ask your teacher.',
   TOO_MANY: 'Too many tries. Wait ten minutes, or ask your teacher.',
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
