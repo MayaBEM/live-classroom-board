@@ -3,7 +3,9 @@ import { h, uuid, clamp, debounce, throttle, toast, modal, confirmDialog, copyTe
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText,
   PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS } from './render.js';
-import { renderPdfPage, getImage } from './pdf.js';
+import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
+import { Instruments } from './instruments.js';
+import { TimerController } from './timer.js';
 import { PageRenderer } from './thumbs.js';
 import { exportDialog } from './export.js';
 import { friendlyError } from './db.js';
@@ -27,6 +29,7 @@ export class BoardView {
     this.review = this.isTeacher && this.assign;        // teacher looking at one student's copy
     this.copy = !this.isTeacher && this.assign;         // a student's own copy
     this.renderer = renderer || new PageRenderer(sb);
+    this.pageMm = {}; this.instr = new Instruments(this, state => this.onInstrChange(state));
     this.stampKind = 'check'; this.lastFeedbackToast = 0;
     this.tool = 'pen'; this.color = this.review ? '#D62F2F' : PEN_COLORS[0][1]; this.hlColor = HL_COLORS[0][1]; this.sizeIdx = 1;
     this.pageId = null; this.view = { s: 1, tx: 0, ty: 0 }; this.q = 1; this.autoFit = true;
@@ -43,6 +46,8 @@ export class BoardView {
     window.__bem = this;
     this.buildUI();
     const st = this.store;
+    this.instr.attach(this.overlay);
+    this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: this.isTeacher });
     this.renderTop(); this.renderRail(); this.renderOpts();
     this.unsubs = [
       st.on('objects', (pids, id) => this.onObjects(pids, id)),
@@ -55,6 +60,7 @@ export class BoardView {
       st.on('presence', s => this.onPresence(s)),
       st.on('participants', () => { if (this.panel === 'people') this.loadPeople(); if (this.review) { this.updateTopState(); } }),
       st.on('me', () => this.onMe()),
+      st.on('instr', p => { if (!this.isTeacher) this.instr.setRemote(p); }),
       st.on('denied', () => toast(st.board && st.board.locked ? 'Writing is locked by your teacher.' : 'That change was not saved.', 'bad')),
       st.on('removed', () => this.showRemoved()),
     ];
@@ -75,7 +81,8 @@ export class BoardView {
     document.body.classList.remove('in-board');
     this.unsubs.forEach(u => u()); this.ro.disconnect();
     document.removeEventListener('keydown', this.keyHandler); document.removeEventListener('keyup', this.keyUp);
-    clearInterval(this.tick); clearInterval(this.lockTimer);
+    clearInterval(this.tick); clearInterval(this.lockTimer); clearInterval(this.shareTimer);
+    this.instr.detach(); this.timerCtl.destroy();
     if (this.review) this.store.unwatch();
     if (!this.embedded) this.store.close();
   }
@@ -150,6 +157,12 @@ export class BoardView {
     }
     this.btnPages = h('button', { class: 'btn sm', onclick: () => this.togglePanel('pages') }, iconEl('pages', 18), h('span', { class: 'lbl' }, 'Pages'));
     bits.push(this.btnPages);
+    const si = bits.indexOf(this.elStatus);
+    bits.splice(si + 1, 0, this.timerCtl.el);
+    if (this.isTeacher && !this.review) {
+      const bi = bits.indexOf(this.btnPages);
+      bits.splice(bi, 0, h('button', { class: 'btn sm', onclick: () => this.timerCtl.dialog(), title: 'Class timer' }, iconEl('timer', 18), h('span', { class: 'lbl lbl-opt' }, 'Timer')));
+    }
     t.replaceChildren(...bits);
     this.renderStatus(st.sync);
     this.updateTopState();
@@ -292,6 +305,10 @@ export class BoardView {
       items.push(h('button', { class: 'tool', 'aria-pressed': String(this.tool === id), disabled: dis, 'data-tool': id, title: label, onclick: () => this.setTool(id) }, iconEl(ic), label));
       if (id === 'move' || id === 'text' || id === 'ellipse') items.push(h('span', { class: 'rule' }));
     }
+    items.push(h('span', { class: 'rule' }));
+    for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler']]) {
+      items.push(h('button', { class: 'tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k), label));
+    }
     this.elRail.replaceChildren(...items);
   }
 
@@ -336,6 +353,7 @@ export class BoardView {
       kids.push(h('span', { class: 'note' }, notes[t] || ''));
     }
     if (this.editor) kids.push(h('button', { class: 'btn primary sm', onclick: () => this.commitEditor() }, iconEl('check', 18), 'Done'));
+    if (this.isTeacher && !this.assign && this.instr.any()) kids.push(h('button', { class: 'btn sm' + (this.instr.sharing ? ' on' : ''), 'aria-pressed': String(this.instr.sharing), title: 'Show your protractor and ruler to the class', 'aria-label': 'Show my protractor and ruler to the class', onclick: () => this.toggleShareInstr() }, iconEl('eye', 18), h('span', { class: 'lbl-opt2' }, this.instr.sharing ? 'Class sees it' : 'Show class')));
     kids.push(h('span', { class: 'grow' }));
     const wide = h('div', { class: 'grp only-wide' }, ...this.navControls());
     kids.push(wide);
@@ -388,6 +406,7 @@ export class BoardView {
     this.sheet.style.width = '1000px'; this.sheet.style.height = pg.h + 'px';
     if (!keepView) { this.autoFit = true; this.fitNow(false); }
     this.q = this.wantQ(); this.sizeCanvases(); this.renderBase(); this.renderInk(); this.renderLive();
+    this.loadPageMm(pg); this.instr.fit(); this.instr.render();
     this.updatePager();
     this.store.track({ name: this.store.name, role: this.role, page: this.store.pages.indexOf(pg) + 1 });
     if (this.copy) this.store.setCurPage(this.store.pages.indexOf(pg) + 1);
@@ -443,6 +462,7 @@ export class BoardView {
     this.sheet.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.s})`;
     this.sheet.style.borderWidth = Math.max(1, 1 / v.s) + 'px';
     this.scheduleQuality();
+    if (this.instr && this.instr.any() || (this.instr && this.instr.remote)) { if (!this._ir) { this._ir = true; requestAnimationFrame(() => { this._ir = false; this.instr.render(); }); } }
     if (!fromRemote) this.broadcastView();
   }
 
@@ -470,6 +490,25 @@ export class BoardView {
     const pg = this.page; if (!pg) return;
     const W = Math.round(1000 * this.q), H = Math.round(pg.h * this.q);
     for (const c of [this.cBase, this.cInk, this.cLive]) { c.width = W; c.height = H; }
+  }
+
+  async loadPageMm(pg) {
+    if (pg.kind !== 'pdf' || this.pageMm[pg.id]) return;
+    try { this.pageMm[pg.id] = await pdfPageMm(this.sb, pg.file_path, pg.pdf_page); if (this.pageId === pg.id) this.instr.render(); } catch (e) { /* default A4 */ }
+  }
+
+  // ---- instruments (protractor, ruler)
+  onInstrChange(state) {
+    if (!(this.isTeacher && !this.assign && this.instr.sharing)) return;
+    if (!this._si) this._si = throttle(s => this.store.sendInstr(s), 60);
+    this._si(state);
+  }
+  toggleShareInstr() {
+    const on = this.instr.sharing = !this.instr.sharing;
+    clearInterval(this.shareTimer);
+    if (on) { this.store.sendInstr(this.instr.shared()); this.shareTimer = setInterval(() => this.store.sendInstr(this.instr.shared()), 4000); toast('Students now see your protractor and ruler.'); }
+    else { this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null }); toast('Students no longer see them.'); }
+    this.renderOpts();
   }
 
   // ===================================================================== rendering

@@ -16,7 +16,7 @@ export class Store {
     this.outboxKey = `bem-outbox-${boardId}-${participantId || 'teacher'}`;
     this.persistSoon = debounce(() => this.persist(), 80);
     this.timers = [];
-    this.scopeId = null; this.mode = 'live'; this.participantsMap = new Map(); this.me = null; this.curPage = null; this.liveCh = null;
+    this.clockOffset = 0; this.scopeId = null; this.mode = 'live'; this.participantsMap = new Map(); this.me = null; this.curPage = null; this.liveCh = null;
   }
 
   on(evt, fn) { (this.listeners[evt] ||= []).push(fn); return () => { this.listeners[evt] = this.listeners[evt].filter(f => f !== fn); }; }
@@ -33,11 +33,21 @@ export class Store {
     if (!b.data) throw new Error('NO_ACCESS');
     if (p.error) throw p.error;
     this.board = b.data; this.pages = p.data; this.mode = b.data.mode || 'live';
+    await this.syncClock();
     if (this.role === 'student' && this.mode === 'assignment') this.scopeId = this.participantId;   // a student only ever sees their own copy
     await this.loadPeople();
     await this.fetchObjects(null, true);
     this.restoreOutbox();
   }
+
+  // everybody counts down against the server's clock, not their own
+  async syncClock() {
+    try {
+      const t0 = Date.now(), { data, error } = await this.sb.rpc('server_now'), t1 = Date.now();
+      if (!error && data) this.clockOffset = Date.parse(data) - (t0 + t1) / 2;
+    } catch (e) { /* keep the old offset */ }
+  }
+  serverNow() { return Date.now() + (this.clockOffset || 0); }
 
   // teacher: every participant of the board. student: only their own row ("me": score, comment, submitted).
   async loadPeople() {
@@ -160,6 +170,7 @@ export class Store {
     const tch = sb.channel(`board:${id}:t`, { config: { private: true, broadcast: { self: false } } });
     tch.on('broadcast', { event: 'laser' }, ({ payload }) => this.emit('laser', payload))
       .on('broadcast', { event: 'view' }, ({ payload }) => this.emit('view', payload))
+      .on('broadcast', { event: 'instr' }, ({ payload }) => this.emit('instr', payload))
       .on('broadcast', { event: 'resync' }, () => this.resync(true))
       .subscribe();
     this.tch = tch;
@@ -208,7 +219,8 @@ export class Store {
   sendLive(payload) { if (this.liveReady) this.live.send({ type: 'broadcast', event: 'live', payload }).catch(() => {}); }
   sendLaser(payload) { this.tch.send({ type: 'broadcast', event: 'laser', payload }).catch(() => {}); }
   sendView(payload) { this.tch.send({ type: 'broadcast', event: 'view', payload }).catch(() => {}); }
-  sendResync() { this.tch.send({ type: 'broadcast', event: 'resync', payload: {} }).catch(() => {}); }
+  sendInstr(payload) { this.tch.send({ type: 'broadcast', event: 'instr', payload }).catch(() => {}); }
+    sendResync() { this.tch.send({ type: 'broadcast', event: 'resync', payload: {} }).catch(() => {}); }
 
   onObjectEvent(p) {
     const r = p.new; if (!r || !r.id) return;

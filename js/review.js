@@ -6,6 +6,7 @@ import { BoardView } from './board.js';
 import { PageRenderer } from './thumbs.js';
 import { exportDialog } from './export.js';
 import { openAddPages } from './pages.js';
+import { TimerController } from './timer.js';
 
 const ONLINE_MS = 75000;
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -27,6 +28,7 @@ export class ReviewView {
         this.roster = (data || []).map(r => r.first_name);
       }
     } catch (e) { /* roster is optional */ }
+    this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: true });
     this.unsubs = [
       st.on('objects', pids => this.onObjects(pids)),
       st.on('participants', () => this.onPeople()),
@@ -39,7 +41,7 @@ export class ReviewView {
   }
 
   destroy() {
-    this.unsubs.forEach(u => u()); clearInterval(this.tick);
+    this.unsubs.forEach(u => u()); clearInterval(this.tick); if (this.timerCtl) this.timerCtl.destroy();
     if (this.view) { this.view.destroy(); this.view = null; }
     document.body.classList.remove('in-board');
     this.store.close();
@@ -76,9 +78,10 @@ export class ReviewView {
     const b = this.store.board;
     const due = b.due_at ? `Due ${fmtWhen(b.due_at)}` : 'No due date';
     this.elHead.replaceChildren(
-      h('div', { class: 'rv-title' }, h('b', null, b.title), h('span', { class: 'tag' }, 'Assignment'), h('span', { class: 'tag' + (b.due_at && new Date(b.due_at) < Date.now() ? ' warn' : '') }, due), this.elStatus),
+      h('div', { class: 'rv-title' }, h('b', null, b.title), h('span', { class: 'tag' }, 'Assignment'), h('span', { class: 'tag' + (b.due_at && new Date(b.due_at) < Date.now() ? ' warn' : '') }, due), this.timerCtl.el, this.elStatus),
       h('div', { class: 'rv-acts' },
         h('button', { class: 'btn sm' + (b.locked ? ' on' : ''), onclick: () => this.toggleLock() }, iconEl(b.locked ? 'lock' : 'unlock', 18), b.locked ? 'Writing locked' : 'Lock writing'),
+        h('button', { class: 'btn sm', onclick: () => this.timerCtl.dialog() }, iconEl('timer', 18), 'Timer'),
         h('button', { class: 'btn sm', onclick: () => this.datesDialog() }, iconEl('file', 18), 'Dates'),
         h('button', { class: 'btn sm', onclick: () => this.shareDialog() }, iconEl('share', 18), 'Share'),
         h('button', { class: 'btn sm', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), 'Add pages'),

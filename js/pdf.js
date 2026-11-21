@@ -92,3 +92,14 @@ export async function renderPdfPage(sb, path, pageNum, widthPx) {
 }
 
 export function forgetFile(path) { docCache.delete(path); imgCache.delete(path); }
+
+const mmCache = new Map();
+// width of a PDF page in millimetres (so the ruler can show real centimetres)
+export async function pdfPageMm(sb, path, pageNum) {
+  const key = path + '#' + pageNum;
+  if (!mmCache.has(key)) {
+    const doc = await getDoc(sb, path), page = await doc.getPage(pageNum);
+    mmCache.set(key, page.getViewport({ scale: 1 }).width * 25.4 / 72);
+  }
+  return mmCache.get(key);
+}

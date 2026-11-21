@@ -33,6 +33,9 @@ const P = {
   back: '<path d="M11 5l-7 7 7 7M4 12h16"/>',
   logout: '<path d="M10 4H4v16h6M9 12h11M16 8l4 4-4 4"/>',
   clear: '<path d="M4 6h16M6 6v14h12V6M9 3h6v3M10 10l4 6M14 10l-4 6"/>',
+  protractor: '<path d="M3 19a9 9 0 0118 0z"/><path d="M12 19v-3M6.5 17l1.4-2.2M17.5 17l-1.4-2.2M4.4 14l2.6.9M19.6 14l-2.6.9"/>',
+  ruler: '<path d="M2 8h20v8H2z"/><path d="M6 8v3M10 8v4.5M14 8v3M18 8v4.5"/>',
+  timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 13.5V9M9 3h6M12 3v3"/>',
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
 };
 
