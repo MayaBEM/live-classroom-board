@@ -779,3 +779,8 @@ input, textarea, select { font-size: max(16px, 1em); }
 .due-chip { padding: 0 8px; font-size: 13px; font-weight: 600; border: 1px solid rgba(0,0,0,.35); }
 .due-chip.soon { background: #FFE2A8; color: #5C3B00; }
 .due-chip.late { background: #F8C9C5; color: #7A1410; }
+
+/* ---- backup reminder: yellow when it has been more than a month */
+.btn.backup-btn.due { background: #FFE2A8; border-color: #8A6A00; color: #5C3B00; }
+.backup-when { margin-top: 10px; font-weight: 600; }
+.backup-when.due { color: #8A5A00; }

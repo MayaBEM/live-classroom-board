@@ -196,13 +196,20 @@ export class TeacherApp {
     this.afterRender();
   }
 
+  // when the last backup was made on this computer (kept in this browser only)
+  lastBackup() { try { const t = Number(localStorage.getItem('bem-last-backup') || 0); return t || null; } catch (e) { return null; } }
+  backupAge() { const t = this.lastBackup(); return t ? Math.floor((Date.now() - t) / 864e5) : null; }
+  backupWords() { const a = this.backupAge(); return a === null ? 'No backup saved yet on this computer.' : a === 0 ? 'Last backup: today.' : `Last backup: ${a} day${a === 1 ? '' : 's'} ago.`; }
+
   // a safety copy of everything the teacher typed in, saved as one file on this computer
   backupDialog() {
     const msg = h('p', { class: 'hint', style: { marginTop: '10px' } });
+    const when = h('p', { class: 'backup-when' + ((this.backupAge() === null || this.backupAge() > 30) ? ' due' : '') }, this.backupWords());
     const go = h('button', { class: 'btn primary' }, iconEl('file', 18), 'Download backup');
     const m = modal({ title: 'Backup', body: h('div', null,
       h('p', null, 'Saves one file to this computer with your students and their codes, classes, boards, what students wrote, scores, your app shelf and the idea boards. Keep it somewhere safe.'),
-      h('p', { class: 'hint', style: { marginTop: '8px' } }, 'Not in the file: uploaded PDFs and pictures (they stay in your Supabase storage). The file has no passwords.'), msg),
+      h('p', { class: 'hint', style: { marginTop: '8px' } }, 'Not in the file: uploaded PDFs and pictures (they stay in your Supabase storage). The file has no passwords.'), when,
+      h('p', { class: 'hint', style: { marginTop: '6px' } }, 'You do not need to do this every time. Once a month is enough, and before the holidays or before deleting something big.'), msg),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Close'), go] });
     go.addEventListener('click', async () => {
       go.disabled = true; msg.textContent = 'Collecting…';
@@ -217,6 +224,8 @@ export class TeacherApp {
         const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
         const a = h('a', { href: URL.createObjectURL(blob), download: `bright-engmath-backup-${new Date().toISOString().slice(0, 10)}.json` });
         document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        try { localStorage.setItem('bem-last-backup', String(Date.now())); } catch (e) { /* ignore */ }
+        when.textContent = this.backupWords(); when.classList.remove('due'); this.markBackupButton();
         msg.textContent = `Done. ${counts.students} students, ${counts.boards} boards, ${counts.objects} pieces of writing saved.`; go.disabled = false;
       } catch (e) { console.error(e); msg.textContent = 'Could not make the backup. ' + friendlyError(e); go.disabled = false; }
     });
@@ -224,11 +233,17 @@ export class TeacherApp {
 
   topBar() {
     return h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'),
-      h('button', { class: 'btn sm', title: 'Save a copy of your students, work and shelf to this computer', onclick: () => this.backupDialog() }, iconEl('file', 18), 'Backup'),
+      h('button', { class: 'btn sm backup-btn', title: 'Save a copy of your students, work and shelf to this computer', onclick: () => this.backupDialog() }, iconEl('file', 18), 'Backup'),
       h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out')));
   }
 
-  afterRender() { this.syncDots(); this.dotPoll = setInterval(() => this.pollIdeas(), 30000); }
+  markBackupButton() {
+    const b = document.querySelector('.backup-btn'); if (!b) return;
+    const a = this.backupAge(), due = a === null || a > 30;
+    b.classList.toggle('due', due); b.title = (due ? 'Time for a backup. ' : '') + this.backupWords();
+  }
+
+  afterRender() { this.markBackupButton(); this.syncDots(); this.dotPoll = setInterval(() => this.pollIdeas(), 30000); }
 
   boardRow(b, extra = null) {
     const pages = (b.pages && b.pages[0] && b.pages[0].count) || 0, link = joinUrl(b.code);
