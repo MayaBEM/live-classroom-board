@@ -3,6 +3,32 @@ import { h, modal, toast } from './util.js';
 import { friendlyError } from './db.js';
 import { checklist } from './members.js';
 
+// a picture file -> a small 16:10 JPEG (as a data address) that is cheap to send to every student
+export async function coverFromFile(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('That file is not a picture.')); i.src = url; });
+    const W = 560, H = 350, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    const r = Math.max(W / img.naturalWidth, H / img.naturalHeight), w = img.naturalWidth * r, hh = img.naturalHeight * r;
+    g.drawImage(img, (W - w) / 2, (H - hh) / 2, w, hh);
+    for (let q = 0.82; q >= 0.4; q -= 0.1) { const d = c.toDataURL('image/jpeg', q); if (d.length <= 110000) return d; }
+    return c.toDataURL('image/jpeg', 0.35);
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// What an app looks like, at a glance: its cover picture, or else the app itself shown small (it cannot be touched, a tap goes to the tile).
+export function appThumb(a) {
+  if (a.cover && /^data:image\/jpeg;base64,/.test(a.cover)) return h('img', { class: 'acover', src: a.cover, alt: '' });
+  if (!/^https?:\/\//i.test(a.url || '')) return null;
+  const W = 1000, H = 625;
+  const frame = h('iframe', { class: 'alive-frame', src: a.url, title: '', tabindex: '-1', 'aria-hidden': 'true', loading: 'lazy', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin', width: String(W), height: String(H) });
+  const box = h('div', { class: 'alive', 'aria-hidden': 'true' }, frame);
+  const fit = () => { const w = box.clientWidth; if (w) frame.style.transform = `scale(${w / W})`; };
+  if (window.ResizeObserver) new ResizeObserver(fit).observe(box); else setTimeout(fit, 50);
+  return box;
+}
+
 export const cleanUrl = raw => {
   let u = String(raw || '').trim();
   if (!u) return '';
@@ -19,6 +45,15 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
   const note = h('input', { class: 'input', id: 'ap-n', value: app && app.note ? app.note : '', maxlength: '140', placeholder: 'Optional: what to practise, like "Halves and quarters"' });
   const list = checklist(master, app ? [...have] : preselect, { empty: 'Your list of students is empty.' });
   const err = h('p', { class: 'error', role: 'alert' });
+  let cover = app && app.cover ? app.cover : null;
+  const coverImg = h('img', { class: 'acover cover-edit', alt: 'Cover picture' });
+  const coverBox = h('div', { class: 'cover-box' }, coverImg);
+  const file = h('input', { type: 'file', accept: 'image/*', id: 'ap-c', hidden: true });
+  const pickBtn = h('button', { type: 'button', class: 'btn sm', onclick: () => file.click() }, 'Choose picture');
+  const dropBtn = h('button', { type: 'button', class: 'btn sm', onclick: () => { cover = null; drawCover(); } }, 'Remove picture');
+  const drawCover = () => { coverImg.hidden = !cover; if (cover) coverImg.src = cover; dropBtn.hidden = !cover; pickBtn.textContent = cover ? 'Change picture' : 'Choose picture'; };
+  file.addEventListener('change', async () => { const f = file.files && file.files[0]; if (!f) return; err.textContent = ''; try { cover = await coverFromFile(f); drawCover(); } catch (e) { err.textContent = friendlyError(e); } file.value = ''; });
+  drawCover();
   const go = h('button', { class: 'btn primary' }, app ? 'Save' : 'Add to my shelf');
   const m = modal({
     title: app ? 'Change app' : 'Add an app to my shelf', wide: true,
@@ -26,6 +61,7 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
       h('div', { class: 'field' }, h('label', { for: 'ap-t' }, 'Name'), title),
       h('div', { class: 'field' }, h('label', { for: 'ap-u' }, 'Link to the app'), url, h('span', { class: 'hint' }, 'The web address of your app or game. Students tap it and it opens in a new tab.')),
       h('div', { class: 'field' }, h('label', { for: 'ap-n' }, 'Note for the student'), note),
+      h('div', { class: 'field' }, h('span', { class: 'label' }, 'Cover picture (optional)'), h('span', { class: 'hint' }, 'A screenshot of the app. Students see it on their tile so they know what they are about to play.'), coverBox, h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, pickBtn, dropBtn), file),
       app ? h('div', { class: 'field' }, h('span', { class: 'label' }, 'Who has this app?'), list.el)
         : h('details', Object.assign({ class: 'field' }, preselect.length ? { open: true } : {}), h('summary', { class: 'label', style: { cursor: 'pointer' } }, preselect.length ? 'Also give it to' : 'Give it to students now (optional)'),
           h('p', { class: 'hint', style: { margin: '6px 0' } }, 'You can leave this empty. The app goes on your shelf, and you add it to students later with "Add from my shelf".'), list.el), err),
@@ -38,7 +74,7 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
     if (!validUrl(u)) { err.textContent = 'That link does not look right. It should look like https://example.com/game'; url.focus(); return; }
     go.disabled = true;
     try {
-      const row = { title: t, url: u, note: note.value.trim() || null };
+      const row = { title: t, url: u, note: note.value.trim() || null, cover };
       let id = app && app.id;
       if (app) { const r = await sb.from('apps').update(row).eq('id', id); if (r.error) throw r.error; }
       else { const r = await sb.from('apps').insert(row).select().single(); if (r.error) throw r.error; id = r.data.id; }

@@ -8,7 +8,7 @@ import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
-import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog } from './shelf.js';
+import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
@@ -347,6 +347,7 @@ export class TeacherApp {
 
   appTile(a, i, { onRemove, removeLabel }) {
     return h('div', { class: 'app-tile ' + TILE5[i % 5] },
+      appThumb(a),
       h('b', { class: 'at' }, a.title),
       a.note ? h('span', { class: 'an' }, a.note) : null,
       h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
@@ -371,6 +372,7 @@ export class TeacherApp {
       h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Step 1: add each of your web apps here once. Step 2: press "Give to students" on an app, or open a student and press "Add from my shelf". It shows on their page as a tile they tap to play.'),
       this.apps.length ? h('div', { class: 'app-grid' }, this.apps.map((a, i) => { const who = names(a.id);
         return h('div', { class: 'app-tile ' + TILE5[i % 5] },
+          appThumb(a),
           h('b', { class: 'at' }, a.title), a.note ? h('span', { class: 'an' }, a.note) : null,
           h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
           h('span', { class: 'aw' }, who.length ? 'For: ' + who.join(', ') : 'Nobody has this yet'),
