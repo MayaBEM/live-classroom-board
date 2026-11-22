@@ -8,6 +8,7 @@ import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
+import { appDialog, giveAppsDialog } from './shelf.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
@@ -40,7 +41,7 @@ export class TeacherApp {
   constructor(root) {
     this.root = root; this.sb = makeClient('teacher');
     this.sel = 'all'; this.classes = []; this.boards = []; this.students = [];
-    this.master = []; this.members = new Map();   // master = the one list of students; members = board id -> set of student ids
+    this.master = []; this.members = new Map(); this.apps = []; this.appLinks = new Map();   // appLinks: app id -> set of student ids   // master = the one list of students; members = board id -> set of student ids
     this.view = null;
   }
 
@@ -110,20 +111,25 @@ export class TeacherApp {
 
   // ----------------------------------------------------------------- dashboard
   async loadAll() {
-    const [c, b, s, ms, bm] = await Promise.all([
+    const [c, b, s, ms, bm, ap, sa] = await Promise.all([
       this.sb.from('classes').select('*').order('name'),
       this.sb.from('boards').select('*, pages(count), classes(name)').order('created_at', { ascending: false }),
       this.sb.from('class_students').select('*').order('first_name'),
       this.sb.from('students').select('*').order('first_name'),
       this.sb.from('board_students').select('board_id,student_id'),
+      this.sb.from('apps').select('*').order('created_at', { ascending: false }),
+      this.sb.from('student_apps').select('app_id,student_id'),
     ]);
-    const err = c.error || b.error || s.error || ms.error || bm.error;
+    const err = c.error || b.error || s.error || ms.error || bm.error || ap.error || sa.error;
     if (err) throw err;
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
+    this.apps = ap.data;
+    this.appLinks = new Map();
+    (sa.data || []).forEach(r => { if (!this.appLinks.has(r.app_id)) this.appLinks.set(r.app_id, new Set()); this.appLinks.get(r.app_id).add(r.student_id); });
     this.members = new Map();
     (bm.data || []).forEach(r => { if (!this.members.has(r.board_id)) this.members.set(r.board_id, new Set()); this.members.get(r.board_id).add(r.student_id); });
     if (this.sel.startsWith('stu:')) { if (!this.master.some(x => 'stu:' + x.id === this.sel)) this.sel = 'students'; }
-    else if (this.sel !== 'all' && this.sel !== 'students' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
+    else if (this.sel !== 'all' && this.sel !== 'students' && this.sel !== 'apps' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
   }
 
   async showDashboard() {
@@ -145,13 +151,14 @@ export class TeacherApp {
       h('h2', null, 'My students'),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
       this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
+      h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'apps'), onclick: () => { this.sel = 'apps'; this.renderDashboard(); } }, 'App shelf', h('span', { class: 'n' }, this.apps.length)),
       h('h2', { style: { marginTop: '14px' } }, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
 
     const main = h('main', { class: 'dash-main' });
     const stu = this.sel.startsWith('stu:') ? this.master.find(x => 'stu:' + x.id === this.sel) : null;
-    if (this.sel === 'students' || stu) {
-      if (stu) main.append(...this.studentPagePanels(stu)); else main.append(this.studentsPanel());
+    if (this.sel === 'students' || this.sel === 'apps' || stu) {
+      if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'apps') main.append(this.appsPanel()); else main.append(this.studentsPanel());
       this.root.replaceChildren(h('div', { class: 'dash' },
         h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
         h('div', { class: 'dash-body' }, side, main)));
@@ -322,7 +329,55 @@ export class TeacherApp {
         slot.append(h('button', { class: 'pg-chip ' + cls2, onclick: () => { location.hash = '#/board/' + id; } }, txt));
       });
     });
-    return [top, work];
+    const mineApps = this.apps.filter(a => (this.appLinks.get(a.id) || new Set()).has(m.id));
+    const shelf = h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, `Games and apps for ${m.first_name}`),
+        h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+          this.apps.length > mineApps.length ? h('button', { class: 'btn sm', onclick: () => giveAppsDialog({ sb: this.sb, student: m, apps: this.apps, have: new Set(mineApps.map(a => a.id)), onSaved: () => this.refresh() }) }, 'Add from my shelf') : null,
+          h('button', { class: 'btn sm primary', onclick: () => this.addApp({ preselect: [m.id] }) }, iconEl('plus', 18), 'Add app'))),
+      mineApps.length ? h('div', { class: 'app-grid' }, mineApps.map((a, i) => this.appTile(a, i, { onRemove: async () => {
+        const { error } = await this.sb.from('student_apps').delete().eq('app_id', a.id).eq('student_id', m.id);
+        if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
+      }, removeLabel: `Take ${a.title} off ${m.first_name}'s page` })))
+        : h('div', { class: 'empty' }, h('b', null, 'No apps yet. '), `Press Add app and paste the link of one of your web apps. ${m.first_name} sees it on their page and taps it to play.`));
+    return [top, work, shelf];
+  }
+
+  addApp(opts) { appDialog({ sb: this.sb, master: this.master, ...opts, onSaved: () => this.refresh() }); }
+
+  appTile(a, i, { onRemove, removeLabel }) {
+    return h('div', { class: 'app-tile ' + TILE5[i % 5] },
+      h('b', { class: 'at' }, a.title),
+      a.note ? h('span', { class: 'an' }, a.note) : null,
+      h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
+      h('div', { class: 'aa' },
+        h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
+        h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change'),
+        h('button', { class: 'x', 'aria-label': removeLabel, title: removeLabel, onclick: onRemove }, iconEl('close', 16))));
+  }
+
+  // the shelf: every app and who has it
+  appsPanel() {
+    const names = id => [...(this.appLinks.get(id) || [])].map(sid => (this.master.find(x => x.id === sid) || {}).first_name).filter(Boolean).sort((a, b) => a.localeCompare(b));
+    const remove = async a => {
+      const ok = await confirmDialog({ title: `Delete "${a.title}"?`, text: 'This takes the app off the shelf and off every student page. The app itself is not touched, only the link.', confirmLabel: 'Delete', danger: true });
+      if (!ok) return;
+      const { error } = await this.sb.from('apps').delete().eq('id', a.id);
+      if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
+    };
+    return h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, 'App shelf'), h('button', { class: 'btn primary', onclick: () => this.addApp({}) }, iconEl('plus', 18), 'Add app')),
+      h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Keep the links of your own web apps and games here, then choose which students get each one. It shows on their page as a tile they tap to play.'),
+      this.apps.length ? h('div', { class: 'app-grid' }, this.apps.map((a, i) => { const who = names(a.id);
+        return h('div', { class: 'app-tile ' + TILE5[i % 5] },
+          h('b', { class: 'at' }, a.title), a.note ? h('span', { class: 'an' }, a.note) : null,
+          h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
+          h('span', { class: 'aw' }, who.length ? 'For: ' + who.join(', ') : 'Nobody has this yet'),
+          h('div', { class: 'aa' },
+            h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
+            h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change / who'),
+            h('button', { class: 'x', 'aria-label': `Delete ${a.title}`, title: 'Delete', onclick: () => remove(a) }, iconEl('trash', 16)))); }))
+        : h('div', { class: 'empty' }, h('b', null, 'The shelf is empty. '), 'Press Add app, type a name and paste the link of a web app you made.'));
   }
 
   // the students in one class

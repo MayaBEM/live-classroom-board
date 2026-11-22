@@ -650,3 +650,28 @@ table.prog thead th { font-size: 13px; color: var(--ink-2); max-width: 160px; ov
 @keyframes newhop { 0%, 55%, 100% { transform: translateY(0); } 15% { transform: translateY(-6px); } 30% { transform: translateY(0); } 42% { transform: translateY(-3px); } }
 @keyframes newnudge { 0%, 70%, 100% { transform: translateX(0); } 76% { transform: translateX(-4px); } 82% { transform: translateX(4px); } 88% { transform: translateX(-3px); } 94% { transform: translateX(0); } }
 .rs-card .nm-link { border: 0; background: transparent; padding: 0; text-align: left; font: inherit; font-size: 18px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+/* ---- app shelf and student app tiles */
+.app-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 12px; padding: 16px 18px 18px; }
+.app-tile { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid rgba(0,0,0,.25); background: var(--tile, var(--sun)); min-width: 0; }
+.app-tile .at { font-size: 18px; overflow-wrap: anywhere; }
+.app-tile .an { font-size: 15px; }
+.app-tile .au, .app-tile .aw { font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.app-tile .aa { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: auto; padding-top: 6px; }
+.app-tile .aa .x { border: 0; background: rgba(255,255,255,.6); width: 36px; height: 36px; display: grid; place-items: center; margin-left: auto; }
+.app-tile .aa .x:hover { background: var(--bad-soft); color: var(--bad); }
+.app-tile .aa a.btn { text-decoration: none; }
+/* what the student sees */
+.agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 12px; }
+.atile { display: flex; flex-direction: column; gap: 4px; min-height: 120px; padding: 14px; border: 1px solid rgba(0,0,0,.25); border-left: 8px solid var(--ink); background: var(--tile, var(--sun)); color: var(--ink); text-decoration: none; min-width: 0; }
+.atile .at { font-size: 20px; overflow-wrap: anywhere; }
+.atile .an { font-size: 15px; }
+.atile .play { margin-top: auto; align-self: flex-start; padding: 6px 16px; background: var(--ink); color: #fff; font-weight: 600; font-size: 16px; }
+.atile.is-new { animation: newnudge 2.6s ease-in-out infinite; }
+
+/* ---- touch lock for the pages that scroll: no sideways slide, no bounce sideways, no zoom by double tap */
+html, body { overflow-x: hidden; overscroll-behavior-x: none; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { touch-action: pan-y; }
+.b-stage, .sheet canvas, canvas { touch-action: none; }
+input, textarea, select { font-size: max(16px, 1em); }
+.tbl-scroll, .tb-tools, .pick-list { touch-action: pan-x pan-y; }

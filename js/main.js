@@ -9,6 +9,8 @@ const meMatch = () => location.hash.match(/^#\/me\/([A-Za-z0-9]{4,12})/);
 const isJoin = () => !!joinMatch() || !!classMatch() || !!meMatch() || /^#\/join\/?$/.test(location.hash);
 const mode = isJoin();
 
+// the pages never zoom by themselves (Safari pinch gestures); lists still scroll up and down
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
 window.addEventListener('unhandledrejection', e => { console.error(e.reason); });
 // moving between the student screens and the teacher screens needs a fresh start
 window.addEventListener('hashchange', () => { if (isJoin() !== mode) location.reload(); else if (mode) location.reload(); });

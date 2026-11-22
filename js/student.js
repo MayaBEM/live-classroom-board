@@ -24,6 +24,23 @@ const MESSAGES = {
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
 
+// the "Games and apps" shelf on a student's page: tiles that open the teacher's web apps in a new tab.
+// An app the student has not opened yet on this device is marked NEW.
+function appsSection(apps, seenKey) {
+  if (!apps || !apps.length) return null;
+  let seen = []; try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch (e) { /* ignore */ }
+  const mark = id => { if (!seen.includes(id)) { seen.push(id); try { localStorage.setItem(seenKey, JSON.stringify(seen)); } catch (e) { /* ignore */ } } };
+  const safe = u => /^https?:\/\//i.test(u) ? u : '#';
+  return h('div', null, h('h2', { class: 'bsec' }, 'Games and apps'),
+    h('div', { class: 'agrid' }, apps.map((a, i) => {
+      const fresh = !seen.includes(a.id);
+      const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer' },
+        h('b', { class: 'at' }, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, a.title), a.note ? h('span', { class: 'an' }, a.note) : null, h('span', { class: 'play' }, 'Play'));
+      tile.addEventListener('click', () => { mark(a.id); tile.classList.remove('is-new'); const nb = tile.querySelector('.new-badge'); if (nb) nb.remove(); });
+      return tile;
+    })));
+}
+
 export async function startStudent(root, code) {
   if (!code) return askCode(root);
   code = code.toUpperCase();
@@ -246,6 +263,7 @@ export async function startClass(root, classCode) {
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`)),
       data.boards.length ? null : h('div', { class: 'notice yellow' }, h('b', null, 'No boards yet. '), 'When your teacher adds one, it shows up here.'),
       todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
+      appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
       done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
       h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')));
   }
@@ -332,8 +350,9 @@ export async function startMe(root, pageCode) {
     page('no-art',
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`)),
       fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
-      data.boards.length ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
+      data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
       todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
+      appsSection(data.apps, `bem-seen-${pageCode}`),
       done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
       h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')));
   }
