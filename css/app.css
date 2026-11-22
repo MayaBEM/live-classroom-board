@@ -691,3 +691,20 @@ input, textarea, select { font-size: max(16px, 1em); }
 .atile { min-height: 0; }
 .alive { position: relative; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; background: #fff; border: 1px solid rgba(0,0,0,.25); pointer-events: none; }
 .alive-frame { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #fff; pointer-events: none; }
+
+/* ---- student page in two columns: games and apps on the left (scroll to find a game), assigned work on the right */
+.entry.no-art.me-wide .side { max-width: 1180px; }
+.me-grid { display: grid; grid-template-columns: minmax(250px, 340px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.me-grid.no-apps { grid-template-columns: minmax(0, 1fr); max-width: 760px; }
+.me-apps { position: sticky; top: 12px; max-height: calc(100dvh - 24px); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 0 12px 12px; background: #fff; border: 1px solid rgba(0,0,0,.25); }
+.me-apps .bsec { position: sticky; top: 0; z-index: 1; margin: 0 -12px 12px; padding: 14px 12px 8px; background: #fff; }
+.me-apps .agrid { grid-template-columns: 1fr; }
+.me-work .bsec:first-child { margin-top: 0; }
+.me-work .blist { max-width: none; }
+@media (max-width: 860px) {
+  .me-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .me-work { order: -1; }
+  .me-apps { position: static; max-height: none; overflow: visible; }
+}
+.entry.no-art.me-wide .side { gap: 14px; padding-top: 20px; padding-bottom: 20px; }
+.entry.me-wide .join-head h1 { margin: 0; }

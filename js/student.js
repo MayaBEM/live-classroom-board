@@ -32,7 +32,7 @@ function appsSection(apps, seenKey) {
   let seen = []; try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch (e) { /* ignore */ }
   const mark = id => { if (!seen.includes(id)) { seen.push(id); try { localStorage.setItem(seenKey, JSON.stringify(seen)); } catch (e) { /* ignore */ } } };
   const safe = u => /^https?:\/\//i.test(u) ? u : '#';
-  return h('div', null, h('h2', { class: 'bsec' }, 'Games and apps'),
+  return h('aside', { class: 'me-apps', 'aria-label': 'Games and apps' }, h('h2', { class: 'bsec' }, 'Games and apps'),
     h('div', { class: 'agrid' }, apps.map((a, i) => {
       const fresh = !seen.includes(a.id);
       const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer' },
@@ -261,13 +261,15 @@ export async function startClass(root, classCode) {
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : 'Open'));
     };
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live'), done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
-    page('no-art',
+    page('no-art me-wide',
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`)),
-      data.boards.length ? null : h('div', { class: 'notice yellow' }, h('b', null, 'No boards yet. '), 'When your teacher adds one, it shows up here.'),
-      todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
-      appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
-      done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
-      h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')));
+      h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
+        appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
+        h('div', { class: 'me-work' },
+          data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'No boards yet. '), 'When your teacher adds one, it shows up here.'),
+          todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
+          done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
+          h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')))));
   }
 
   if (saved && saved.name && saved.pin) { const r = await portal(saved.name, saved.pin); if (r.data) return showBoards(r.data, saved.name, saved.pin); forget(); }
@@ -349,14 +351,16 @@ export async function startMe(root, pageCode) {
     const fresh = data.boards.filter(b => b.status === 'new' && b.code);
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort((a, b) => (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0));
     const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
-    page('no-art',
+    page('no-art me-wide',
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`)),
       fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
-      data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
-      todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
-      appsSection(data.apps, `bem-seen-${pageCode}`),
-      done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
-      h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')));
+      h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
+        appsSection(data.apps, `bem-seen-${pageCode}`),
+        h('div', { class: 'me-work' },
+        data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
+        todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
+        done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
+        h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
   }
 
   if (savedPin) { const r = await portal(savedPin); if (r.data) return showBoards(r.data, savedPin); forget(); }
