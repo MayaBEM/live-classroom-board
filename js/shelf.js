@@ -53,7 +53,7 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
 // put apps that are already on the shelf onto one student's page
 export function giveAppsDialog({ sb, student, apps, have, onSaved }) {
   const cand = apps.filter(a => !have.has(a.id)).map(a => ({ id: a.id, first_name: a.title, code: null }));
-  const list = checklist(cand, [], { empty: 'Every app on your shelf is already on this page. Use "Add app" to put a new one on the shelf.' });
+  const list = checklist(cand, [], { empty: apps.length ? 'Every app on your shelf is already on this page. Use "Add app" to put a new one on the shelf.' : 'Your shelf is empty. Close this and press "Add app" first: type a name and paste the link of a web app. After that it appears here.' });
   const err = h('p', { class: 'error', role: 'alert' });
   const go = async () => {
     const ids = list.ids(); if (!ids.length) { err.textContent = 'Tick at least one app.'; return; }

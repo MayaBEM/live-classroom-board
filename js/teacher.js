@@ -333,7 +333,7 @@ export class TeacherApp {
     const shelf = h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `Games and apps for ${m.first_name}`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-          this.apps.length > mineApps.length ? h('button', { class: 'btn sm', onclick: () => giveAppsDialog({ sb: this.sb, student: m, apps: this.apps, have: new Set(mineApps.map(a => a.id)), onSaved: () => this.refresh() }) }, 'Add from my shelf') : null,
+          h('button', { class: 'btn sm', onclick: () => giveAppsDialog({ sb: this.sb, student: m, apps: this.apps, have: new Set(mineApps.map(a => a.id)), onSaved: () => this.refresh() }) }, 'Add from my shelf'),
           h('button', { class: 'btn sm primary', onclick: () => this.addApp({ preselect: [m.id] }) }, iconEl('plus', 18), 'Add app'))),
       mineApps.length ? h('div', { class: 'app-grid' }, mineApps.map((a, i) => this.appTile(a, i, { onRemove: async () => {
         const { error } = await this.sb.from('student_apps').delete().eq('app_id', a.id).eq('student_id', m.id);
