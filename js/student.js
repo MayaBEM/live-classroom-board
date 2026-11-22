@@ -38,7 +38,7 @@ function appsSection(apps, seenKey) {
     h('div', { class: 'agrid' }, apps.map((a, i) => {
       const fresh = !seen.includes(a.id);
       const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer' },
-        appThumb(a),
+        appThumb(a, false) || h('span', { class: 'aph', 'aria-hidden': 'true' }, (a.title || '?').trim().charAt(0).toUpperCase()),
         h('span', { class: 'atx' }, h('b', { class: 'at' }, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, a.title), a.note ? h('span', { class: 'an' }, a.note) : null),
         h('span', { class: 'play' }, 'Play'));
       tile.addEventListener('click', () => { mark(a.id); tile.classList.remove('is-new'); const nb = tile.querySelector('.new-badge'); if (nb) nb.remove(); });

@@ -18,9 +18,9 @@ export async function coverFromFile(file) {
 }
 
 // What an app looks like, at a glance: its cover picture, or else the app itself shown small (it cannot be touched, a tap goes to the tile).
-export function appThumb(a) {
+export function appThumb(a, live = true) {
   if (a.cover && /^data:image\/jpeg;base64,/.test(a.cover)) return h('img', { class: 'acover', src: a.cover, alt: '' });
-  if (!/^https?:\/\//i.test(a.url || '')) return null;
+  if (!live || !/^https?:\/\//i.test(a.url || '')) return null;   // students never run an app just to see it: only a picture, so nothing can play a sound
   const W = 1000, H = 625;
   const frame = h('iframe', { class: 'alive-frame', src: a.url, title: '', tabindex: '-1', 'aria-hidden': 'true', loading: 'lazy', referrerpolicy: 'no-referrer', allow: "autoplay 'none'; microphone 'none'; camera 'none'", sandbox: 'allow-scripts allow-same-origin', width: String(W), height: String(H) });
   const box = h('div', { class: 'alive', 'aria-hidden': 'true' }, frame);
@@ -61,7 +61,7 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
       h('div', { class: 'field' }, h('label', { for: 'ap-t' }, 'Name'), title),
       h('div', { class: 'field' }, h('label', { for: 'ap-u' }, 'Link to the app'), url, h('span', { class: 'hint' }, 'The web address of your app or game. Students tap it and it opens in a new tab.')),
       h('div', { class: 'field' }, h('label', { for: 'ap-n' }, 'Note for the student'), note),
-      h('div', { class: 'field' }, h('span', { class: 'label' }, 'Cover picture (optional)'), h('span', { class: 'hint' }, 'A screenshot of the app. Students see it on their tile so they know what they are about to play.'), coverBox, h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, pickBtn, dropBtn), file),
+      h('div', { class: 'field' }, h('span', { class: 'label' }, 'Cover picture (optional)'), h('span', { class: 'hint' }, 'A screenshot of the app. Students see this picture on their tile so they know what they are about to play. (Students never see the running app there, so nothing can make a sound.)'), coverBox, h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, pickBtn, dropBtn), file),
       app ? h('div', { class: 'field' }, h('span', { class: 'label' }, 'Who has this app?'), list.el)
         : h('details', Object.assign({ class: 'field' }, preselect.length ? { open: true } : {}), h('summary', { class: 'label', style: { cursor: 'pointer' } }, preselect.length ? 'Also give it to' : 'Give it to students now (optional)'),
           h('p', { class: 'hint', style: { margin: '6px 0' } }, 'You can leave this empty. The app goes on your shelf, and you add it to students later with "Add from my shelf".'), list.el), err),
