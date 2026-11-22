@@ -145,3 +145,22 @@ export function openAddPages({ sb, boardId, pages, onDone }) {
     } catch (e) { err.textContent = friendlyError(e); go.disabled = false; bar.hidden = true; }
   });
 }
+
+// change the name of a board or assignment (students see the new name the next time they open their page)
+export function renameBoardDialog({ sb, board, onSaved }) {
+  const input = h('input', { class: 'input', id: 'rb-t', value: board.title, maxlength: '120' });
+  const err = h('p', { class: 'error', role: 'alert' });
+  const save = async () => {
+    const t = input.value.trim().replace(/\s+/g, ' ');
+    if (!t) { err.textContent = 'Give it a name.'; input.focus(); return; }
+    if (t === board.title) { m.close(); return; }
+    go.disabled = true;
+    const { error } = await sb.from('boards').update({ title: t }).eq('id', board.id);
+    if (error) { err.textContent = friendlyError(error); go.disabled = false; return; }
+    board.title = t; m.close(); toast('Name changed.', 'ok'); if (onSaved) onSaved(t);
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } });
+  const go = h('button', { class: 'btn primary', onclick: save }, 'Save');
+  const m = modal({ title: 'Rename', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'rb-t' }, 'Name of the board or assignment'), input), err), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go] });
+  setTimeout(() => input.select(), 60);
+}

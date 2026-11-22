@@ -9,6 +9,7 @@ import { openAddPages } from './pages.js';
 import { TimerController } from './timer.js';
 import { shareDialog } from './share.js';
 import { boardRoster, boardStudentsDialog } from './members.js';
+import { renameBoardDialog } from './pages.js';
 
 const ONLINE_MS = 75000;
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -77,7 +78,7 @@ export class ReviewView {
     const b = this.store.board;
     const due = b.due_at ? `Due ${fmtWhen(b.due_at)}` : 'No due date';
     this.elHead.replaceChildren(
-      h('div', { class: 'rv-title' }, h('b', null, b.title), h('span', { class: 'tag' }, 'Assignment'), h('span', { class: 'tag' + (b.due_at && new Date(b.due_at) < Date.now() ? ' warn' : '') }, due), this.timerCtl.el, this.elStatus),
+      h('div', { class: 'rv-title' }, h('b', null, b.title), h('button', { class: 'btn quiet sm', title: 'Change the name', 'aria-label': 'Rename', onclick: () => renameBoardDialog({ sb: this.sb, board: this.store.board, onSaved: () => this.renderHeader() }) }, iconEl('pen', 16)), h('span', { class: 'tag' }, 'Assignment'), h('span', { class: 'tag' + (b.due_at && new Date(b.due_at) < Date.now() ? ' warn' : '') }, due), this.timerCtl.el, this.elStatus),
       h('div', { class: 'rv-acts' },
         h('button', { class: 'btn sm' + (b.locked ? ' on' : ''), onclick: () => this.toggleLock() }, iconEl(b.locked ? 'lock' : 'unlock', 18), b.locked ? 'Writing locked' : 'Lock writing'),
         h('button', { class: 'btn sm', title: 'Class timer', 'aria-label': 'Class timer', onclick: () => this.timerCtl.dialog() }, iconEl('timer', 18), h('span', { class: 'rv-lbl' }, 'Timer')),

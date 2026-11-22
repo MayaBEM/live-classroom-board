@@ -784,3 +784,4 @@ input, textarea, select { font-size: max(16px, 1em); }
 .btn.backup-btn.due { background: #FFE2A8; border-color: #8A6A00; color: #5C3B00; }
 .backup-when { margin-top: 10px; font-weight: 600; }
 .backup-when.due { color: #8A5A00; }
+.tbar .title.editable, .b-top .title.editable, .title.editable { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 4px; }

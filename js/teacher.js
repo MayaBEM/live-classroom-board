@@ -6,7 +6,7 @@ import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
 import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
-import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
+import { createBoard, deleteBoard, deleteClass, sourceForm, renameBoardDialog } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
 import { IdeaBoard, STUDENT_INK, TEACHER_INK } from './idea.js';
@@ -262,6 +262,7 @@ export class TeacherApp {
       h('div', { class: 'acts' }, sw,
         b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', onclick: () => boardStudentsDialog({ sb: this.sb, board: b, onSaved: async () => { await this.loadAll(); this.renderDashboard(); } }) }, 'Students') : null,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
+        h('button', { class: 'btn sm', title: 'Change the name', onclick: () => renameBoardDialog({ sb: this.sb, board: b, onSaved: () => this.refresh() }) }, 'Rename'),
         h('button', { class: 'btn sm primary', onclick: () => { location.hash = '#/board/' + b.id; } }, 'Open'),
         h('button', { class: 'btn sm danger', 'aria-label': `Delete ${b.title}`, onclick: () => this.deleteBoardDialog(b) }, iconEl('trash', 18))));
   }

@@ -11,7 +11,7 @@ import { exportDialog } from './export.js';
 import { shareDialog } from './share.js';
 import { CONFIG } from '../config.js';
 import { friendlyError } from './db.js';
-import { openAddPages } from './pages.js';
+import { openAddPages, renameBoardDialog } from './pages.js';
 
 const TOOLS = [
   ['move', 'Move', 'move'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
@@ -152,7 +152,13 @@ export class BoardView {
       this.elLockTag.append(iconEl('lock', 16), h('span', { class: 'lbl long' }, 'Writing is locked'), h('span', { class: 'lbl short' }, 'Locked'));
       if (this.isTeacher) L.push(tb('back', 'Back to my boards', () => this.onExit()));
       else if (this.onBack) L.push(tb('back', 'My boards', () => this.exitBoard()));
-      L.push(brand, h('span', { class: 'title', title: st.board.title }, st.board.title), this.elStatus);
+      const titleEl = h('span', { class: 'title', title: st.board.title }, st.board.title);
+      if (this.isTeacher) {   // the teacher can tap the name to change it
+        titleEl.classList.add('editable'); titleEl.setAttribute('role', 'button'); titleEl.setAttribute('tabindex', '0'); titleEl.title = 'Tap to rename';
+        const rename = () => renameBoardDialog({ sb: this.sb, board: st.board, onSaved: t => { titleEl.textContent = t; } });
+        titleEl.addEventListener('click', rename); titleEl.addEventListener('keydown', e => { if (e.key === 'Enter') rename(); });
+      }
+      L.push(brand, titleEl, this.elStatus);
       Rt.push(this.elFollowTag, this.btnBackToTeacher, this.elLockTag);
       if (this.isTeacher) {
         this.btnFollow = tb('follow', 'Follow me', () => this.toggleFollow()); this.btnFollow.setAttribute('aria-pressed', 'false'); this.btnFollow.title = 'Follow me: students see the page and zoom you are looking at';
