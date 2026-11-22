@@ -83,3 +83,21 @@ export function giveToStudentsDialog({ sb, master, app, have, onSaved }) {
   const m = modal({ title: `Who plays "${app.title}"?`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Tick the students who get this app on their page. Untick to take it away.'), list.el, err),
     actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: go }, 'Save')] });
 }
+
+// look at an app inside the teacher page, as a tablet or as a phone, before giving it to students
+export function previewDialog(app) {
+  const frame = h('iframe', { class: 'pv-frame', src: app.url, title: app.title, loading: 'lazy', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock allow-modals' });
+  const stage = h('div', { class: 'pv-stage' }, frame);
+  let size = 'tablet';
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Preview size' });
+  const draw = () => {
+    seg.replaceChildren(...[['tablet', 'Tablet'], ['phone', 'Phone']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(size === k), onclick: () => { size = k; draw(); } }, label)));
+    stage.className = 'pv-stage ' + size;
+  };
+  draw();
+  modal({ title: `Preview: ${app.title}`, wide: true,
+    body: h('div', null,
+      h('div', { class: 'pv-bar' }, seg, h('button', { class: 'btn sm', onclick: () => { frame.src = app.url; } }, 'Reload'), h('a', { class: 'btn sm', href: app.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open in new tab')),
+      stage,
+      h('p', { class: 'hint', style: { marginTop: '8px' } }, 'This is the real app, so you can play it here. If the window stays blank, that app does not allow previews: press Open in new tab.')) });
+}

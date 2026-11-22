@@ -8,7 +8,7 @@ import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
-import { appDialog, giveAppsDialog, giveToStudentsDialog } from './shelf.js';
+import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog } from './shelf.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
@@ -351,6 +351,7 @@ export class TeacherApp {
       a.note ? h('span', { class: 'an' }, a.note) : null,
       h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
       h('div', { class: 'aa' },
+        h('button', { class: 'btn sm primary', onclick: () => previewDialog(a) }, 'Preview'),
         h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
         h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change'),
         h('button', { class: 'x', 'aria-label': removeLabel, title: removeLabel, onclick: onRemove }, iconEl('close', 16))));
@@ -374,7 +375,8 @@ export class TeacherApp {
           h('span', { class: 'au' }, a.url.replace(/^https?:\/\//i, '')),
           h('span', { class: 'aw' }, who.length ? 'For: ' + who.join(', ') : 'Nobody has this yet'),
           h('div', { class: 'aa' },
-            h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
+            h('button', { class: 'btn sm primary', onclick: () => previewDialog(a) }, 'Preview'),
+        h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
             h('button', { class: 'btn sm primary', onclick: () => giveToStudentsDialog({ master: this.master, sb: this.sb, app: a, have: this.appLinks.get(a.id) || new Set(), onSaved: () => this.refresh() }) }, 'Give to students'),
             h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change'),
             h('button', { class: 'x', 'aria-label': `Delete ${a.title}`, title: 'Delete', onclick: () => remove(a) }, iconEl('trash', 16)))); }))
