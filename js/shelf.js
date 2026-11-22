@@ -3,15 +3,15 @@ import { h, modal, toast } from './util.js';
 import { friendlyError } from './db.js';
 import { checklist } from './members.js';
 
-// a picture file -> a small 16:10 JPEG (as a data address) that is cheap to send to every student
-export async function coverFromFile(file) {
+// a picture file -> a small square JPEG (as a data address) that is cheap to send to every student
+export async function coverFromFile(file, focusX = 0.5) {
   const url = URL.createObjectURL(file);
   try {
     const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('That file is not a picture.')); i.src = url; });
-    const W = 560, H = 350, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const W = 360, H = 360, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
     const r = Math.max(W / img.naturalWidth, H / img.naturalHeight), w = img.naturalWidth * r, hh = img.naturalHeight * r;
-    g.drawImage(img, (W - w) / 2, (H - hh) / 2, w, hh);
+    g.drawImage(img, -(w - W) * Math.min(1, Math.max(0, focusX)), (H - hh) / 2, w, hh);   // a square picture, cut from the middle (focusX moves the cut left or right)
     for (let q = 0.82; q >= 0.4; q -= 0.1) { const d = c.toDataURL('image/jpeg', q); if (d.length <= 110000) return d; }
     return c.toDataURL('image/jpeg', 0.35);
   } finally { URL.revokeObjectURL(url); }

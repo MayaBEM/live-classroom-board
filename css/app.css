@@ -730,3 +730,10 @@ input, textarea, select { font-size: max(16px, 1em); }
 .me-apps .atile .aph { width: 84px; flex: none; font-size: 18px; }
 .me-apps .atile { cursor: pointer; padding-right: 8px; }
 .me-apps .atile:hover { filter: brightness(.97); }
+
+/* ---- cover pictures are squares */
+.acover, .atile .aph { aspect-ratio: 1 / 1; }
+.app-tile .acover, .app-tile .alive { width: 120px; max-width: 100%; }
+.cover-box { max-width: 160px; }
+.me-apps .atile .acover, .me-apps .atile .aph { width: 64px; flex: none; }
+.me-apps .atile .aph { font-size: 22px; }
