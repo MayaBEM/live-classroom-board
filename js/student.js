@@ -37,10 +37,10 @@ function appsSection(apps, seenKey) {
   return h('aside', { class: 'me-apps', 'aria-label': 'Games and apps' }, h('h2', { class: 'bsec' }, 'Games and apps'),
     h('div', { class: 'agrid' }, apps.map((a, i) => {
       const fresh = !seen.includes(a.id);
-      const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer' },
+      const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Play ' + a.title },
         appThumb(a, false) || h('span', { class: 'aph', 'aria-hidden': 'true' }, (a.title || '?').trim().charAt(0).toUpperCase()),
         h('span', { class: 'atx' }, h('b', { class: 'at' }, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, a.title), a.note ? h('span', { class: 'an' }, a.note) : null),
-        h('span', { class: 'play' }, 'Play'));
+        null);
       tile.addEventListener('click', () => { mark(a.id); tile.classList.remove('is-new'); const nb = tile.querySelector('.new-badge'); if (nb) nb.remove(); });
       return tile;
     })));

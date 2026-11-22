@@ -728,3 +728,5 @@ input, textarea, select { font-size: max(16px, 1em); }
 .me-apps .new-badge { padding: 0 5px; font-size: 10px; margin-right: 5px; }
 .atile .aph { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 10; background: #fff; border: 1px solid rgba(0,0,0,.25); font-weight: 600; font-size: 22px; }
 .me-apps .atile .aph { width: 84px; flex: none; font-size: 18px; }
+.me-apps .atile { cursor: pointer; padding-right: 8px; }
+.me-apps .atile:hover { filter: brightness(.97); }
