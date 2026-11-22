@@ -8,6 +8,7 @@ import { brand, artSvg } from './teacher.js';
 import { iconEl } from './icons.js';
 import { CONFIG } from '../config.js';
 import { appThumb } from './shelf.js';
+import { IdeaBoard } from './idea.js';
 
 const MESSAGES = {
   NAME_IN_USE: 'Someone is using that name right now. Add the first letter of your last name, like "Emma K".',
@@ -24,6 +25,22 @@ const MESSAGES = {
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
+
+// how soon is it due: "Overdue", "Due today", "Due tomorrow", or the date
+function dueInfo(due_at, status) {
+  if (!due_at || status === 'sent' || status === 'checked') return null;
+  const ms = Date.parse(due_at) - Date.now(), day = 864e5;
+  const start = d => new Date(d).setHours(0, 0, 0, 0), diffDays = Math.round((start(due_at) - start(Date.now())) / day);
+  if (ms < 0) return { text: 'Overdue', cls: 'late' };
+  if (diffDays === 0) return { text: 'Due today', cls: 'soon' };
+  if (diffDays === 1) return { text: 'Due tomorrow', cls: 'soon' };
+  return null;
+}
+const dueSort = (a, b) => {
+  const da = a.due_at ? Date.parse(a.due_at) : Infinity, db = b.due_at ? Date.parse(b.due_at) : Infinity;
+  if (da !== db) return da - db;
+  return (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0);
+};
 // "Teacher Maya" on every student page, so it is clear who is teaching
 const teacherTag = () => h('p', { class: 'teacher-tag' }, h('b', null, 'Teacher ' + (CONFIG.TEACHER_NAME || '')));
 
@@ -256,7 +273,7 @@ export async function startClass(root, classCode) {
       return h('div', { class: 'bcard ' + cls },
         h('div', { class: 'bc-main' }, h('b', null, b.title),
           h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
-            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
+            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
           h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
         h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
           const btn = e.currentTarget; btn.disabled = true;
@@ -264,7 +281,7 @@ export async function startClass(root, classCode) {
           if (r) { btn.disabled = false; toast(r.text, 'bad'); }
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : 'Open'));
     };
-    const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live'), done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
+    const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort), done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
       h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
@@ -335,8 +352,57 @@ export async function startMe(root, pageCode) {
 
   const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+  // ---- the small idea board in the top right corner: write or draw anything, it saves by itself
+  let ideaTimer = null, ideaPoll = null, ideaFlush = null;
+  const stopIdea = () => { clearInterval(ideaPoll); clearTimeout(ideaTimer); ideaPoll = null; if (ideaFlush) { ideaFlush(); ideaFlush = null; } };
+  function ideaPanel(idea, pin) {
+    idea = idea || { strokes: [], tstrokes: [], reply: null, reply_at: null };
+    const seenKey = `bem-idea-seen-${pageCode}`;
+    const seenAt = () => { try { return Number(localStorage.getItem(seenKey) || 0); } catch (e) { return 0; } };
+    const markSeen = () => { try { localStorage.setItem(seenKey, String(Date.now())); } catch (e) { /* ignore */ } badge.hidden = true; };
+    const hasReply = i => !!(i && ((i.tstrokes && i.tstrokes.length) || i.reply));
+    const isNew = i => hasReply(i) && i.reply_at && Date.parse(i.reply_at) > seenAt();
+    const status = h('span', { class: 'idea-status' }, '');
+    const badge = h('span', { class: 'new-badge', hidden: !isNew(idea) }, 'NEW');
+    const replyBox = h('p', { class: 'idea-reply', hidden: !idea.reply }, idea.reply || '');
+    let latest = idea.strokes || [], dirty = false;
+    const save = async () => {
+      clearTimeout(ideaTimer); if (!dirty) return; dirty = false; status.textContent = 'Saving…';
+      try {
+        const { data: r, error } = await sb.rpc('idea_save', { p_page: pageCode, p_pin: pin, p_strokes: latest });
+        if (error || (r && r.error)) throw new Error('save');
+        status.textContent = 'Saved';
+      } catch (e) { dirty = true; status.textContent = 'Not saved. Check your internet.'; }
+    };
+    ideaFlush = () => { if (dirty) save(); };
+    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: 'Tell Teacher Maya', onChange: list => { latest = list; dirty = true; status.textContent = 'Writing…'; clearTimeout(ideaTimer); ideaTimer = setTimeout(save, 1200); } });
+    const big = h('button', { type: 'button', class: 'ib', 'aria-label': 'Make the board bigger', title: 'Bigger', onclick: () => {
+      const on = !inner.classList.contains('big');
+      if (on) slot.style.minHeight = inner.offsetHeight + 'px';
+      inner.classList.toggle('big', on); big.setAttribute('aria-pressed', String(on)); big.setAttribute('aria-label', on ? 'Make the board smaller' : 'Make the board bigger');
+    } }, iconEl('fit', 16));
+    box.bar.append(big);
+    if (badge) box.bar.querySelector('.idea-label').append(' ', badge);
+    box.canvas.addEventListener('pointerdown', () => { if (!badge.hidden) markSeen(); });
+    replyBox.addEventListener('click', markSeen);
+    const inner = h('div', { class: 'idea-wrap' }, box.el, h('div', { class: 'idea-foot' }, status), replyBox);
+    const slot = h('div', { class: 'idea-slot' }, inner);
+    visibilityFlush();
+    clearInterval(ideaPoll);
+    ideaPoll = setInterval(async () => {   // pick up what the teacher wrote back
+      try {
+        const { data: r } = await sb.rpc('idea_get', { p_page: pageCode, p_pin: pin });
+        if (r && r.idea) { box.setOther(r.idea.tstrokes); replyBox.textContent = r.idea.reply || ''; replyBox.hidden = !r.idea.reply; if (isNew(r.idea)) badge.hidden = false; }
+      } catch (e) { /* try again next time */ }
+    }, 45000);
+    return slot;
+  }
+  let flushHooked = false;
+  function visibilityFlush() { if (flushHooked) return; flushHooked = true; document.addEventListener('visibilitychange', () => { if (document.hidden && ideaFlush) ideaFlush(); }); addEventListener('pagehide', () => { if (ideaFlush) ideaFlush(); }); }
+
   function showBoards(data, pin) {
-    const refresh = async () => { const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
+    stopIdea();
+    const refresh = async () => { stopIdea(); const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
     const card = b => {
       const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, fresh = b.status === 'new' && !locked;
       return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
@@ -344,19 +410,21 @@ export async function startMe(root, pageCode) {
           h('b', null, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
           h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
             b.class ? h('span', null, b.class) : null,
-            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
+            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
           h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
         h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
           const btn = e.currentTarget; btn.disabled = true;
-          const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
+          stopIdea(); const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
           if (r) { btn.disabled = false; toast(r.text, 'bad'); }
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : fresh ? 'Start' : 'Open'));
     };
     const fresh = data.boards.filter(b => b.status === 'new' && b.code);
-    const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort((a, b) => (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0));
+    const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort);
     const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
-      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
+      h('div', { class: 'me-top' },
+        h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
+        ideaPanel(data.idea, pin)),
       fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
       h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
         appsSection(data.apps, `bem-seen-${pageCode}`),

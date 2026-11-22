@@ -9,6 +9,7 @@ import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
+import { IdeaBoard, STUDENT_INK, TEACHER_INK } from './idea.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
@@ -41,7 +42,7 @@ export class TeacherApp {
   constructor(root) {
     this.root = root; this.sb = makeClient('teacher');
     this.sel = 'all'; this.classes = []; this.boards = []; this.students = [];
-    this.master = []; this.members = new Map(); this.apps = []; this.appLinks = new Map();   // appLinks: app id -> set of student ids   // master = the one list of students; members = board id -> set of student ids
+    this.master = []; this.members = new Map(); this.apps = []; this.appLinks = new Map(); this.ideaMeta = new Map();   // appLinks: app id -> set of student ids   // master = the one list of students; members = board id -> set of student ids
     this.view = null;
   }
 
@@ -111,7 +112,7 @@ export class TeacherApp {
 
   // ----------------------------------------------------------------- dashboard
   async loadAll() {
-    const [c, b, s, ms, bm, ap, sa] = await Promise.all([
+    const [c, b, s, ms, bm, ap, sa, im] = await Promise.all([
       this.sb.from('classes').select('*').order('name'),
       this.sb.from('boards').select('*, pages(count), classes(name)').order('created_at', { ascending: false }),
       this.sb.from('class_students').select('*').order('first_name'),
@@ -119,11 +120,13 @@ export class TeacherApp {
       this.sb.from('board_students').select('board_id,student_id'),
       this.sb.from('apps').select('*').order('created_at', { ascending: false }),
       this.sb.from('student_apps').select('app_id,student_id'),
+      this.sb.from('idea_boards').select('student_id,n,updated_at,teacher_seen_at'),
     ]);
-    const err = c.error || b.error || s.error || ms.error || bm.error || ap.error || sa.error;
+    const err = c.error || b.error || s.error || ms.error || bm.error || ap.error || sa.error || im.error;
     if (err) throw err;
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
     this.apps = ap.data;
+    this.ideaMeta = new Map((im.data || []).map(r => [r.student_id, r]));
     this.appLinks = new Map();
     (sa.data || []).forEach(r => { if (!this.appLinks.has(r.app_id)) this.appLinks.set(r.app_id, new Set()); this.appLinks.get(r.app_id).add(r.student_id); });
     this.members = new Map();
@@ -142,6 +145,7 @@ export class TeacherApp {
   }
 
   renderDashboard() {
+    clearInterval(this.ideaPoll); clearInterval(this.dotPoll);
     const tabs = [h('button', { class: 'tab', 'aria-current': String(this.sel === 'all'), onclick: () => { this.sel = 'all'; this.renderDashboard(); } }, 'All boards', h('span', { class: 'n' }, this.boards.length))];
     this.classes.forEach((c, ci) => {
       const n = this.boards.filter(b => b.class_id === c.id).length;
@@ -150,7 +154,7 @@ export class TeacherApp {
     const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' },
       h('h2', null, 'My students'),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
-      this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
+      this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'data-sid': m.id, 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'apps'), onclick: () => { this.sel = 'apps'; this.renderDashboard(); } }, 'App shelf', h('span', { class: 'n' }, this.apps.length)),
       h('h2', { style: { marginTop: '14px' } }, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
@@ -160,8 +164,9 @@ export class TeacherApp {
     if (this.sel === 'students' || this.sel === 'apps' || stu) {
       if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'apps') main.append(this.appsPanel()); else main.append(this.studentsPanel());
       this.root.replaceChildren(h('div', { class: 'dash' },
-        h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
+        this.topBar(),
         h('div', { class: 'dash-body' }, side, main)));
+      this.afterRender();
       return;
     }
     const cls = this.classes.find(c => c.id === this.sel);
@@ -186,9 +191,44 @@ export class TeacherApp {
     }
 
     this.root.replaceChildren(h('div', { class: 'dash' },
-      h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'), h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out'))),
+      this.topBar(),
       h('div', { class: 'dash-body' }, side, main)));
+    this.afterRender();
   }
+
+  // a safety copy of everything the teacher typed in, saved as one file on this computer
+  backupDialog() {
+    const msg = h('p', { class: 'hint', style: { marginTop: '10px' } });
+    const go = h('button', { class: 'btn primary' }, iconEl('file', 18), 'Download backup');
+    const m = modal({ title: 'Backup', body: h('div', null,
+      h('p', null, 'Saves one file to this computer with your students and their codes, classes, boards, what students wrote, scores, your app shelf and the idea boards. Keep it somewhere safe.'),
+      h('p', { class: 'hint', style: { marginTop: '8px' } }, 'Not in the file: uploaded PDFs and pictures (they stay in your Supabase storage). The file has no passwords.'), msg),
+      actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Close'), go] });
+    go.addEventListener('click', async () => {
+      go.disabled = true; msg.textContent = 'Collecting…';
+      try {
+        const get = async (table, cols = '*') => { const { data, error } = await this.sb.from(table).select(cols); if (error) throw error; return data || []; };
+        const out = { app: 'Bright EngMath Live Board', saved_at: new Date().toISOString() };
+        for (const [t, cols] of [['classes', '*'], ['students', '*'], ['class_students', '*'], ['boards', '*'], ['pages', '*'], ['board_students', '*'], ['apps', '*'], ['student_apps', '*'], ['idea_boards', '*'], ['participants', 'id,board_id,name,submitted_at,score,comment,created_at']]) { msg.textContent = 'Collecting ' + t + '…'; out[t] = await get(t, cols); }
+        const objs = []; for (let from = 0; ; from += 1000) { msg.textContent = `Collecting writing… ${objs.length}`; const { data, error } = await this.sb.from('objects').select('*').order('id').range(from, from + 999); if (error) throw error; objs.push(...data); if (data.length < 1000) break; }
+        out.objects = objs;
+        const counts = Object.fromEntries(Object.entries(out).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length]));
+        out.counts = counts;
+        const blob = new Blob([JSON.stringify(out)], { type: 'application/json' });
+        const a = h('a', { href: URL.createObjectURL(blob), download: `bright-engmath-backup-${new Date().toISOString().slice(0, 10)}.json` });
+        document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        msg.textContent = `Done. ${counts.students} students, ${counts.boards} boards, ${counts.objects} pieces of writing saved.`; go.disabled = false;
+      } catch (e) { console.error(e); msg.textContent = 'Could not make the backup. ' + friendlyError(e); go.disabled = false; }
+    });
+  }
+
+  topBar() {
+    return h('div', { class: 'dash-top' }, brand(), h('div', { class: 'who' }, h('span', null, 'Teacher'),
+      h('button', { class: 'btn sm', title: 'Save a copy of your students, work and shelf to this computer', onclick: () => this.backupDialog() }, iconEl('file', 18), 'Backup'),
+      h('button', { class: 'btn sm', onclick: () => this.signOut() }, iconEl('logout', 18), 'Sign out')));
+  }
+
+  afterRender() { this.syncDots(); this.dotPoll = setInterval(() => this.pollIdeas(), 30000); }
 
   boardRow(b, extra = null) {
     const pages = (b.pages && b.pages[0] && b.pages[0].count) || 0, link = joinUrl(b.code);
@@ -279,7 +319,7 @@ export class TeacherApp {
     return h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, 'All my students')),
       h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Add each student once. Their code never changes. When you make a class or a board, just tick who is in it.'),
-      this.master.length ? h('div', { class: 'roster-grid' }, this.master.map((s, i) => { const cl = classesOf(s); return h('div', { class: 'rs-card ' + TILE5[i % 5] },
+      this.master.length ? h('div', { class: 'roster-grid' }, this.master.map((s, i) => { const cl = classesOf(s); return h('div', { class: 'rs-card ' + TILE5[i % 5], 'data-sid': s.id },
         h('button', { class: 'nm nm-link', title: `Open ${s.first_name}'s page`, onclick: () => { this.sel = 'stu:' + s.id; this.renderDashboard(); } }, s.first_name),
         h('button', { class: 'code', title: 'Change code', 'aria-label': `${s.first_name}'s code ${s.code}. Change it`, onclick: () => this.editCode(s) }, s.code),
         h('button', { class: 'x', 'aria-label': `Remove ${s.first_name}`, onclick: () => remove(s) }, iconEl('close', 16)),
@@ -288,6 +328,22 @@ export class TeacherApp {
       this.master.length ? h('div', { class: 'roster-acts' },
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(this.master.map(s => `${s.first_name}: ${s.code}`).join('\n'))) ? 'Names and codes copied.' : 'Could not copy.', 'ok') }, iconEl('copy', 16), 'Copy names and codes')) : null,
       h('div', { class: 'add-students' }, input, h('button', { class: 'btn', onclick: add }, 'Add names')));
+  }
+
+  // a note on a student's board that the teacher has not looked at yet
+  ideaUnread(sid) { const m = this.ideaMeta.get(sid); return !!(m && m.n > 0 && (!m.teacher_seen_at || Date.parse(m.updated_at) > Date.parse(m.teacher_seen_at))); }
+  syncDots() {
+    document.querySelectorAll('[data-sid]').forEach(el => {
+      const on = this.ideaUnread(el.dataset.sid), dot = el.querySelector('.unread-dot');
+      if (on && !dot) el.prepend(h('span', { class: 'unread-dot', title: 'New writing on the board', 'aria-label': 'New writing on the board' }));
+      if (!on && dot) dot.remove();
+    });
+  }
+  async pollIdeas() {
+    try {
+      const { data } = await this.sb.from('idea_boards').select('student_id,n,updated_at,teacher_seen_at');
+      if (data) { this.ideaMeta = new Map(data.map(r => [r.student_id, r])); this.syncDots(); }
+    } catch (e) { /* next time */ }
   }
 
   // the boards a student sees: made just for them, or boards of their classes that they are part of
@@ -340,7 +396,59 @@ export class TeacherApp {
         if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
       }, removeLabel: `Take ${a.title} off ${m.first_name}'s page` })))
         : h('div', { class: 'empty' }, h('b', null, 'No apps yet. '), `Press Add from my shelf and tick the apps ${m.first_name} should play. (Build your shelf first in App shelf on the left.)`));
-    return [top, work, shelf];
+    return [this.ideaPanel(m), top, work, shelf];
+  }
+
+  // the student's small board: what they wrote for the teacher, and the teacher's writing and message on top
+  ideaPanel(m) {
+    const host = h('div', { class: 'idea-teacher' }, h('p', { class: 'empty' }, 'Loading…'));
+    const status = h('span', { class: 'idea-status' }, '');
+    const section = h('section', { class: 'sheet-panel' }, h('header', null, h('h2', null, `${m.first_name}'s board`), status), host);
+    let box = null, row = null, timer = null, dirty = false, lastSeen = null;
+    const saveInk = async list => {
+      status.textContent = 'Saving…';
+      const { error } = await this.sb.from('idea_boards').upsert({ student_id: m.id, tstrokes: list, teacher_updated_at: new Date().toISOString() }, { onConflict: 'student_id' });
+      status.textContent = error ? 'Not saved: ' + friendlyError(error) : 'Saved';
+    };
+    const markSeen = async () => {
+      const now = new Date().toISOString();
+      const { error } = await this.sb.from('idea_boards').update({ teacher_seen_at: now }).eq('student_id', m.id);
+      if (!error) { const meta = this.ideaMeta.get(m.id); if (meta) meta.teacher_seen_at = now; this.syncDots(); }
+    };
+    const build = r => {
+      row = r || { strokes: [], tstrokes: [], reply: null, n: 0 };
+      box = new IdeaBoard({ strokes: row.tstrokes, other: row.strokes, ink: TEACHER_INK, otherInk: STUDENT_INK, label: 'Write back in purple',
+        onChange: list => { status.textContent = 'Writing…'; clearTimeout(timer); timer = setTimeout(() => saveInk(list), 900); } });
+      const msg = h('input', { class: 'input', maxlength: '300', value: row.reply || '', placeholder: `A short message for ${m.first_name}`, 'aria-label': `Message for ${m.first_name}` });
+      const saveMsg = async () => {
+        const v = msg.value.trim() || null; if (v === (row.reply || null)) return;
+        status.textContent = 'Saving…';
+        const { error } = await this.sb.from('idea_boards').upsert({ student_id: m.id, reply: v, teacher_updated_at: new Date().toISOString() }, { onConflict: 'student_id' });
+        if (!error) row.reply = v; status.textContent = error ? 'Not saved: ' + friendlyError(error) : 'Saved';
+      };
+      msg.addEventListener('change', saveMsg); msg.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveMsg(); } });
+      const wipe = h('button', { class: 'btn sm danger', onclick: async () => {
+        const ok = await confirmDialog({ title: `Clear ${m.first_name}'s writing?`, text: `This wipes what ${m.first_name} wrote on the board. Your purple writing and message stay.`, confirmLabel: 'Clear', danger: true });
+        if (!ok) return;
+        const { error } = await this.sb.from('idea_boards').update({ strokes: [], n: 0, updated_at: new Date().toISOString(), teacher_seen_at: new Date().toISOString() }).eq('student_id', m.id);
+        if (error) return toast(friendlyError(error), 'bad');
+        row.strokes = []; box.setOther([]); const meta = this.ideaMeta.get(m.id); if (meta) { meta.n = 0; } this.syncDots();
+      } }, iconEl('trash', 16), `Clear ${m.first_name}'s writing`);
+      host.replaceChildren(
+        h('p', { class: 'hint', style: { padding: '10px 18px 0' } }, `${m.first_name} writes here on their page. You see it live, and you can write over it in purple and leave a short message.`),
+        h('div', { class: 'idea-teacher-board' }, box.el),
+        h('div', { class: 'add-students' }, msg, h('button', { class: 'btn', onclick: saveMsg }, 'Save message'), wipe));
+      if (this.ideaUnread(m.id)) markSeen();
+    };
+    this.sb.from('idea_boards').select('*').eq('student_id', m.id).maybeSingle().then(({ data, error }) => {
+      if (error) { host.replaceChildren(h('p', { class: 'empty' }, friendlyError(error))); return; }
+      lastSeen = data ? data.updated_at : null; build(data);
+      this.ideaPoll = setInterval(async () => {   // what the student writes shows up here by itself
+        const r = await this.sb.from('idea_boards').select('strokes,updated_at').eq('student_id', m.id).maybeSingle();
+        if (r.data && r.data.updated_at !== lastSeen) { lastSeen = r.data.updated_at; row.strokes = r.data.strokes; box.setOther(r.data.strokes); this.ideaMeta.set(m.id, { ...(this.ideaMeta.get(m.id) || {}), student_id: m.id, n: r.data.strokes.length, updated_at: r.data.updated_at }); markSeen(); }
+      }, 8000);
+    });
+    return section;
   }
 
   addApp(opts) { appDialog({ sb: this.sb, master: this.master, ...opts, onSaved: () => this.refresh() }); }

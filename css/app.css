@@ -745,3 +745,37 @@ input, textarea, select { font-size: max(16px, 1em); }
 .me-apps .atile .atx { display: block; flex: none; text-align: center; }
 .me-apps .atile .at { display: block; font-size: 12px; line-height: 1.2; font-weight: 500; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .me-apps .atile .new-badge { position: absolute; left: 4px; top: 4px; margin: 0; z-index: 1; font-size: 9px; padding: 0 4px; }
+
+/* ---- the small idea board, top right of the student page */
+.me-top { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.me-top .join-head { flex: 1 1 260px; min-width: 0; }
+.idea-slot { position: relative; width: 270px; flex: none; max-width: 100%; }
+.idea-wrap { background: #fff; border: 2px solid var(--ink); width: 100%; }
+.idea-wrap.big { position: absolute; right: 0; top: 0; z-index: 30; width: min(660px, calc(100vw - 32px)); }
+.idea-board { display: block; }
+.idea-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 3px 4px; background: #FFF3C4; border-bottom: 1px solid rgba(0,0,0,.25); }
+.idea-label { font-size: 12px; font-weight: 600; margin-right: auto; white-space: nowrap; }
+.ib { width: 28px; height: 28px; display: inline-grid; place-items: center; padding: 0; border: 1px solid rgba(0,0,0,.4); background: #fff; color: var(--ink); cursor: pointer; touch-action: manipulation; }
+.ib[aria-pressed="true"] { background: #fff; outline: 2px solid var(--ink); outline-offset: -2px; }
+.ib.dot { width: 22px; height: 22px; background: var(--c); }
+.ib.dot[aria-pressed="true"] { outline: 2px solid var(--ink); outline-offset: 1px; }
+.ib.armed { background: var(--bad-soft, #FBE3E1); color: var(--bad, #B3261E); }
+.idea-sheet { position: relative; aspect-ratio: 2 / 1; background: #fff; }
+.idea-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; -webkit-user-select: none; user-select: none; }
+.idea-foot { display: flex; padding: 2px 6px; min-height: 18px; font-size: 11px; color: var(--ink-2); border-top: 1px solid rgba(0,0,0,.15); }
+.idea-reply { margin: 0; padding: 6px 8px; background: #F1E8FB; border-top: 1px solid rgba(0,0,0,.2); font-size: 13px; color: #4B1D80; overflow-wrap: anywhere; }
+.idea-reply[hidden] { display: none; }
+@media (max-width: 860px) { .idea-slot { width: 100%; } .idea-wrap.big { width: 100%; } }
+
+/* ---- teacher: the student's board, and the orange mark for new writing */
+.idea-teacher-board { max-width: 680px; padding: 12px 18px 4px; }
+.idea-teacher-board .idea-board { border: 2px solid var(--ink); background: #fff; }
+.sheet-panel > header .idea-status { font-size: 13px; color: var(--ink-2); font-weight: 400; }
+.unread-dot { display: inline-block; width: 10px; height: 10px; margin-right: 8px; background: var(--orange); border: 1px solid rgba(0,0,0,.4); flex: none; }
+.rs-card .unread-dot { position: absolute; right: 8px; top: 8px; margin: 0; }
+.tab .unread-dot { order: -1; margin-right: 6px; }
+
+/* ---- due soon */
+.due-chip { padding: 0 8px; font-size: 13px; font-weight: 600; border: 1px solid rgba(0,0,0,.35); }
+.due-chip.soon { background: #FFE2A8; color: #5C3B00; }
+.due-chip.late { background: #F8C9C5; color: #7A1410; }
