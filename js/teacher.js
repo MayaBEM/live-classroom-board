@@ -8,7 +8,7 @@ import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
-import { appDialog, giveAppsDialog } from './shelf.js';
+import { appDialog, giveAppsDialog, giveToStudentsDialog } from './shelf.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
@@ -333,13 +333,13 @@ export class TeacherApp {
     const shelf = h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `Games and apps for ${m.first_name}`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
-          h('button', { class: 'btn sm', onclick: () => giveAppsDialog({ sb: this.sb, student: m, apps: this.apps, have: new Set(mineApps.map(a => a.id)), onSaved: () => this.refresh() }) }, 'Add from my shelf'),
-          h('button', { class: 'btn sm primary', onclick: () => this.addApp({ preselect: [m.id] }) }, iconEl('plus', 18), 'Add app'))),
+          h('button', { class: 'btn sm primary', onclick: () => giveAppsDialog({ sb: this.sb, student: m, apps: this.apps, have: new Set(mineApps.map(a => a.id)), onSaved: () => this.refresh() }) }, iconEl('plus', 18), 'Add from my shelf'),
+          h('button', { class: 'btn sm', title: 'Put a brand new app on your shelf and on this page', onclick: () => this.addApp({ preselect: [m.id] }) }, 'New app'))),
       mineApps.length ? h('div', { class: 'app-grid' }, mineApps.map((a, i) => this.appTile(a, i, { onRemove: async () => {
         const { error } = await this.sb.from('student_apps').delete().eq('app_id', a.id).eq('student_id', m.id);
         if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
       }, removeLabel: `Take ${a.title} off ${m.first_name}'s page` })))
-        : h('div', { class: 'empty' }, h('b', null, 'No apps yet. '), `Press Add app and paste the link of one of your web apps. ${m.first_name} sees it on their page and taps it to play.`));
+        : h('div', { class: 'empty' }, h('b', null, 'No apps yet. '), `Press Add from my shelf and tick the apps ${m.first_name} should play. (Build your shelf first in App shelf on the left.)`));
     return [top, work, shelf];
   }
 
@@ -366,8 +366,8 @@ export class TeacherApp {
       if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
     };
     return h('section', { class: 'sheet-panel' },
-      h('header', null, h('h2', null, 'App shelf'), h('button', { class: 'btn primary', onclick: () => this.addApp({}) }, iconEl('plus', 18), 'Add app')),
-      h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Keep the links of your own web apps and games here, then choose which students get each one. It shows on their page as a tile they tap to play.'),
+      h('header', null, h('h2', null, 'App shelf'), h('button', { class: 'btn primary', onclick: () => this.addApp({}) }, iconEl('plus', 18), 'Add app to shelf')),
+      h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Step 1: add each of your web apps here once. Step 2: press "Give to students" on an app, or open a student and press "Add from my shelf". It shows on their page as a tile they tap to play.'),
       this.apps.length ? h('div', { class: 'app-grid' }, this.apps.map((a, i) => { const who = names(a.id);
         return h('div', { class: 'app-tile ' + TILE5[i % 5] },
           h('b', { class: 'at' }, a.title), a.note ? h('span', { class: 'an' }, a.note) : null,
@@ -375,7 +375,8 @@ export class TeacherApp {
           h('span', { class: 'aw' }, who.length ? 'For: ' + who.join(', ') : 'Nobody has this yet'),
           h('div', { class: 'aa' },
             h('a', { class: 'btn sm', href: a.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
-            h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change / who'),
+            h('button', { class: 'btn sm primary', onclick: () => giveToStudentsDialog({ master: this.master, sb: this.sb, app: a, have: this.appLinks.get(a.id) || new Set(), onSaved: () => this.refresh() }) }, 'Give to students'),
+            h('button', { class: 'btn sm', onclick: () => this.addApp({ app: a, have: this.appLinks.get(a.id) || new Set() }) }, 'Change'),
             h('button', { class: 'x', 'aria-label': `Delete ${a.title}`, title: 'Delete', onclick: () => remove(a) }, iconEl('trash', 16)))); }))
         : h('div', { class: 'empty' }, h('b', null, 'The shelf is empty. '), 'Press Add app, type a name and paste the link of a web app you made.'));
   }

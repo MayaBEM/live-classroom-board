@@ -19,14 +19,16 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
   const note = h('input', { class: 'input', id: 'ap-n', value: app && app.note ? app.note : '', maxlength: '140', placeholder: 'Optional: what to practise, like "Halves and quarters"' });
   const list = checklist(master, app ? [...have] : preselect, { empty: 'Your list of students is empty.' });
   const err = h('p', { class: 'error', role: 'alert' });
-  const go = h('button', { class: 'btn primary' }, app ? 'Save' : 'Add to shelf');
+  const go = h('button', { class: 'btn primary' }, app ? 'Save' : 'Add to my shelf');
   const m = modal({
-    title: app ? 'Change app' : 'Add an app or game', wide: true,
+    title: app ? 'Change app' : 'Add an app to my shelf', wide: true,
     body: h('div', null,
       h('div', { class: 'field' }, h('label', { for: 'ap-t' }, 'Name'), title),
       h('div', { class: 'field' }, h('label', { for: 'ap-u' }, 'Link to the app'), url, h('span', { class: 'hint' }, 'The web address of your app or game. Students tap it and it opens in a new tab.')),
       h('div', { class: 'field' }, h('label', { for: 'ap-n' }, 'Note for the student'), note),
-      h('div', { class: 'field' }, h('span', { class: 'label' }, 'Who gets this app?'), list.el), err),
+      app ? h('div', { class: 'field' }, h('span', { class: 'label' }, 'Who has this app?'), list.el)
+        : h('details', Object.assign({ class: 'field' }, preselect.length ? { open: true } : {}), h('summary', { class: 'label', style: { cursor: 'pointer' } }, preselect.length ? 'Also give it to' : 'Give it to students now (optional)'),
+          h('p', { class: 'hint', style: { margin: '6px 0' } }, 'You can leave this empty. The app goes on your shelf, and you add it to students later with "Add from my shelf".'), list.el), err),
     actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
   });
   go.addEventListener('click', async () => {
@@ -44,7 +46,7 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
       const drop = [...have].filter(s => !want.has(s)), add = [...want].filter(s => !have.has(s));
       if (drop.length) { const r = await sb.from('student_apps').delete().eq('app_id', id).in('student_id', drop); if (r.error) throw r.error; }
       if (add.length) { const r = await sb.from('student_apps').insert(add.map(s => ({ app_id: id, student_id: s }))); if (r.error) throw r.error; }
-      m.close(); toast(app ? 'App saved.' : `Added. ${want.size} student${want.size === 1 ? '' : 's'} can play it.`, 'ok');
+      m.close(); toast(app ? 'App saved.' : want.size ? `Added to your shelf and to ${want.size} student${want.size === 1 ? '' : 's'}.` : 'Added to your shelf. Now add it to students with "Give to students".', 'ok');
       if (onSaved) onSaved();
     } catch (e) { err.textContent = friendlyError(e); go.disabled = false; }
   });
@@ -63,4 +65,21 @@ export function giveAppsDialog({ sb, student, apps, have, onSaved }) {
   };
   const m = modal({ title: `Apps for ${student.first_name}`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Tick apps from your shelf.'), list.el, err),
     actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), ...(cand.length ? [h('button', { class: 'btn primary', onclick: go }, 'Add to page')] : [])] });
+}
+
+// from the shelf: choose which students have one app
+export function giveToStudentsDialog({ sb, master, app, have, onSaved }) {
+  const list = checklist(master, [...have], { empty: 'Your list of students is empty.' });
+  const err = h('p', { class: 'error', role: 'alert' });
+  const go = async () => {
+    const want = new Set(list.ids());
+    const drop = [...have].filter(x => !want.has(x)), add = [...want].filter(x => !have.has(x));
+    try {
+      if (drop.length) { const r = await sb.from('student_apps').delete().eq('app_id', app.id).in('student_id', drop); if (r.error) throw r.error; }
+      if (add.length) { const r = await sb.from('student_apps').insert(add.map(x => ({ app_id: app.id, student_id: x }))); if (r.error) throw r.error; }
+      m.close(); toast(`${app.title} is on ${want.size} student page${want.size === 1 ? '' : 's'}.`, 'ok'); if (onSaved) onSaved();
+    } catch (e) { err.textContent = friendlyError(e); }
+  };
+  const m = modal({ title: `Who plays "${app.title}"?`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Tick the students who get this app on their page. Untick to take it away.'), list.el, err),
+    actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: go }, 'Save')] });
 }
