@@ -24,8 +24,8 @@ const MESSAGES = {
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
-// "Your teacher: Teacher Maya" on every student page, so it is clear who is teaching
-const teacherTag = () => h('p', { class: 'teacher-tag' }, h('span', null, 'Your teacher'), h('b', null, 'Teacher ' + (CONFIG.TEACHER_NAME || '')));
+// "Teacher Maya" on every student page, so it is clear who is teaching
+const teacherTag = () => h('p', { class: 'teacher-tag' }, h('b', null, 'Teacher ' + (CONFIG.TEACHER_NAME || '')));
 
 // the "Games and apps" shelf on a student's page: tiles that open the teacher's web apps in a new tab.
 // An app the student has not opened yet on this device is marked NEW.

@@ -22,7 +22,7 @@ export function appThumb(a) {
   if (a.cover && /^data:image\/jpeg;base64,/.test(a.cover)) return h('img', { class: 'acover', src: a.cover, alt: '' });
   if (!/^https?:\/\//i.test(a.url || '')) return null;
   const W = 1000, H = 625;
-  const frame = h('iframe', { class: 'alive-frame', src: a.url, title: '', tabindex: '-1', 'aria-hidden': 'true', loading: 'lazy', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin', width: String(W), height: String(H) });
+  const frame = h('iframe', { class: 'alive-frame', src: a.url, title: '', tabindex: '-1', 'aria-hidden': 'true', loading: 'lazy', referrerpolicy: 'no-referrer', allow: "autoplay 'none'; microphone 'none'; camera 'none'", sandbox: 'allow-scripts allow-same-origin', width: String(W), height: String(H) });
   const box = h('div', { class: 'alive', 'aria-hidden': 'true' }, frame);
   const fit = () => { const w = box.clientWidth; if (w) frame.style.transform = `scale(${w / W})`; };
   if (window.ResizeObserver) new ResizeObserver(fit).observe(box); else setTimeout(fit, 50);

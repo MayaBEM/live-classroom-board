@@ -54,7 +54,7 @@ export class TimerController {
     this.el.hidden = false;
     if (over && !this.handled.has(t.seq)) {
       this.handled.add(t.seq);
-      if (this.store.serverNow() - t.end < 8000) { beep(); toast("Time is up.", 'bad'); }   // not for a timer that ended long ago
+      if (this.store.serverNow() - t.end < 8000) { if (this.isTeacher) beep(); toast("Time is up.", 'bad'); }   // students see it, they do not hear it   // not for a timer that ended long ago
       if (this.isTeacher && t.lock) this.sb.from('boards').update({ locked: true }).eq('id', this.store.boardId).then(() => {});
     }
   }
@@ -88,7 +88,7 @@ export class TimerController {
       big,
       running || paused ? null : h('div', null, h('div', { class: 'label', style: { margin: '14px 0 6px' } }, 'Minutes'), presets, h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' } }, h('label', { for: 'tm' }, 'or type'), custom)),
       h('label', { style: { display: 'flex', gap: '10px', alignItems: 'center', margin: '16px 0 4px', fontWeight: '500' } }, lock, 'Lock student writing when time is up'),
-      h('p', { class: 'hint' }, 'Everyone on the board sees the countdown and hears a beep at the end. Locking happens while your screen is open.'));
+      h('p', { class: 'hint' }, 'Everyone on the board sees the countdown, and you hear a beep at the end. Students hear nothing. Locking happens while your screen is open.'));
     let m;
     const btn = (label, fn, cls = 'btn') => h('button', { class: cls, onclick: async () => { await fn(); m.close(); } }, label);
     const acts = running
