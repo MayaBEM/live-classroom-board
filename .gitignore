@@ -3,3 +3,5 @@ dev-server.mjs
 .claude/
 .DS_Store
 *.zip
+
+_covers_tmp/
