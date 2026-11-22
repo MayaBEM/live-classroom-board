@@ -24,6 +24,8 @@ const MESSAGES = {
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
+// "Your teacher: Teacher Maya" on every student page, so it is clear who is teaching
+const teacherTag = () => h('p', { class: 'teacher-tag' }, h('span', null, 'Your teacher'), h('b', null, 'Teacher ' + (CONFIG.TEACHER_NAME || '')));
 
 // the "Games and apps" shelf on a student's page: tiles that open the teacher's web apps in a new tab.
 // An app the student has not opened yet on this device is marked NEW.
@@ -37,7 +39,8 @@ function appsSection(apps, seenKey) {
       const fresh = !seen.includes(a.id);
       const tile = h('a', { class: 'atile ' + TILE[i % TILE.length] + (fresh ? ' is-new' : ''), href: safe(a.url), target: '_blank', rel: 'noopener noreferrer' },
         appThumb(a),
-        h('b', { class: 'at' }, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, a.title), a.note ? h('span', { class: 'an' }, a.note) : null, h('span', { class: 'play' }, 'Play'));
+        h('span', { class: 'atx' }, h('b', { class: 'at' }, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, a.title), a.note ? h('span', { class: 'an' }, a.note) : null),
+        h('span', { class: 'play' }, 'Play'));
       tile.addEventListener('click', () => { mark(a.id); tile.classList.remove('is-new'); const nb = tile.querySelector('.new-badge'); if (nb) nb.remove(); });
       return tile;
     })));
@@ -87,7 +90,7 @@ export async function startStudent(root, code) {
     } catch (e) { console.error(e); const m = (e && e.message) || ''; return { key: Object.keys(MESSAGES).find(k => m.includes(k)) || '', text: msgFor(e) }; }
   };
 
-  const heading = () => h('div', { class: 'join-head' }, h('p', { class: 'hint' }, info.mode === 'assignment' ? 'Assignment' : 'You are joining'), h('h1', null, info.title),
+  const heading = () => h('div', { class: 'join-head' }, h('p', { class: 'hint' }, info.mode === 'assignment' ? 'Assignment' : 'You are joining'), h('h1', null, info.title), teacherTag(),
     info.mode === 'assignment' ? h('div', { class: 'notice yellow' }, h('b', null, 'This is your own private copy.'), ' Only your teacher can see your work.', info.due_at ? h('span', null, ` Due ${when(info.due_at)}.`) : null) : null);
 
   // ----------------------------------------------------------- class list: tap your name, then type your code
@@ -214,7 +217,7 @@ export async function startClass(root, classCode) {
 
   function showNames() {
     const tiles = info.names.map((n, i) => h('button', { class: 'name-tile ' + TILE[i % TILE.length], onclick: () => showCode(n) }, h('span', null, n)));
-    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your class'), h('h1', null, info.name)),
+    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your class'), h('h1', null, info.name), teacherTag()),
       saved && saved.name ? h('div', { class: 'welcome' }, h('p', null, `Welcome back, ${saved.name}.`),
         h('button', { class: 'btn primary big', onclick: async e => { e.currentTarget.disabled = true; const r = await portal(saved.name, saved.pin); if (r.data) showBoards(r.data, saved.name, saved.pin); else { forget(); showNames(); } } }, `Continue as ${saved.name}`),
         h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'I am someone else')) : null,
@@ -236,7 +239,7 @@ export async function startClass(root, classCode) {
       b.addEventListener('paste', e => { const d = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4); if (!d) return; e.preventDefault(); d.split('').forEach((c, k) => { boxes[k].value = c; }); if (d.length === 4) go(); });
     });
     const idx = Math.max(0, info.names.indexOf(name));
-    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your class'), h('h1', null, info.name)),
+    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your class'), h('h1', null, info.name), teacherTag()),
       h('div', { class: 'whoami ' + TILE[idx % TILE.length] }, h('small', null, 'You are'), h('b', null, name)),
       h('p', { class: 'step' }, h('span', { class: 'n n3' }, '2'), 'Type your 4-number code'), h('div', { class: 'pin-row' }, boxes), err,
       h('button', { class: 'btn quiet', onclick: showNames }, 'That is not me'));
@@ -262,7 +265,7 @@ export async function startClass(root, classCode) {
     };
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live'), done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
-      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`)),
+      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
       h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
         appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
         h('div', { class: 'me-work' },
@@ -324,7 +327,7 @@ export async function startMe(root, pageCode) {
       b.addEventListener('keydown', e => { if (e.key === 'Backspace' && !b.value && i > 0) boxes[i - 1].focus(); if (e.key === 'Enter') go(); });
       b.addEventListener('paste', e => { const d = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4); if (!d) return; e.preventDefault(); d.split('').forEach((c, k) => { boxes[k].value = c; }); if (d.length === 4) go(); });
     });
-    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${name}!`)),
+    page('', h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${name}!`), teacherTag()),
       h('p', { class: 'step' }, h('span', { class: 'n n3' }, '1'), 'Type your 4-number code'), h('div', { class: 'pin-row' }, boxes), err);
     boxes[0].focus();
   }
@@ -352,7 +355,7 @@ export async function startMe(root, pageCode) {
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort((a, b) => (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0));
     const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
-      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`)),
+      h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
       fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
       h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
         appsSection(data.apps, `bem-seen-${pageCode}`),

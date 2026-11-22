@@ -708,3 +708,21 @@ input, textarea, select { font-size: max(16px, 1em); }
 }
 .entry.no-art.me-wide .side { gap: 14px; padding-top: 20px; padding-bottom: 20px; }
 .entry.me-wide .join-head h1 { margin: 0; }
+
+/* ---- "Your teacher: Teacher Maya" */
+.teacher-tag { display: inline-flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 15px; }
+.teacher-tag span { color: var(--ink-2); }
+.teacher-tag b { padding: 2px 10px; background: var(--sun); border: 1px solid rgba(0,0,0,.3); font-weight: 600; }
+
+/* ---- the games shelf is a quiet, compact list: a small picture, the name, a small Play */
+.me-grid { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
+.me-apps { padding: 0 10px 10px; }
+.me-apps .bsec { margin: 0 -10px 8px; padding: 12px 10px 6px; font-size: 16px; }
+.me-apps .agrid { gap: 8px; }
+.me-apps .atile { flex-direction: row; align-items: center; gap: 10px; min-height: 0; padding: 6px 8px 6px 6px; border-left-width: 5px; }
+.me-apps .atile .acover, .me-apps .atile .alive { width: 84px; flex: none; }
+.me-apps .atile .atx { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.me-apps .atile .at { font-size: 15px; line-height: 1.25; }
+.me-apps .atile .an { font-size: 12px; color: var(--ink-2); }
+.me-apps .atile .play { margin: 0; align-self: center; padding: 4px 10px; font-size: 13px; }
+.me-apps .new-badge { padding: 0 5px; font-size: 10px; margin-right: 5px; }
