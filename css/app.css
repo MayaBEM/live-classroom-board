@@ -916,6 +916,28 @@ input, textarea, select { font-size: max(16px, 1em); }
 .home-tab { margin-bottom: 6px; font-weight: 600; }
 .avatar-btn { padding: 0; border: 0; background: none; cursor: pointer; display: inline-grid; flex: none; }
 .dash .sheet-panel > header { align-items: center; }
-.avatar-pick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.avatar-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px; }
 .avatar-opt { padding: 6px; border: 2px solid var(--hair, #E1DDD1); background: #fff; display: grid; place-items: center; cursor: pointer; }
 .avatar-opt[aria-pressed="true"] { border-color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); }
+
+/* ---- the teacher looking at a student's page */
+.teacher-preview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; margin-bottom: 10px; background: #FFF1C7; border: 2px solid var(--ink); font-weight: 500; }
+
+/* ---- the teacher looking at a student's page */
+.teacher-preview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; margin-bottom: 10px; background: #FFF1C7; border: 2px solid var(--ink); font-weight: 500; }
+
+/* ---- "My work": a bar that slides out from the left on a student's board */
+.work-back { position: fixed; inset: 0; z-index: 70; background: rgba(29,33,39,.28); }
+.work-drawer { position: fixed; left: 0; top: 0; bottom: 0; width: min(360px, 88vw); z-index: 71; background: var(--paper); border-right: 2px solid var(--ink); overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; transform: translateX(-104%); transition: transform .24s ease-out; box-shadow: 6px 0 0 rgba(29,33,39,.14); }
+.work-drawer.open { transform: none; }
+.work-drawer[hidden], .work-back[hidden] { display: none; }
+.work-drawer header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; position: sticky; top: 0; background: var(--sun); border-bottom: 2px solid var(--ink); z-index: 1; }
+.work-drawer header h2 { margin: 0; font-size: 20px; }
+.wd-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.wd-body h3 { margin: 8px 0 0; font-size: 15px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .04em; }
+.wd-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px 12px; text-align: left; background: #fff; border: 2px solid var(--ink); border-left-width: 8px; min-height: var(--tap); cursor: pointer; }
+.wd-row b { font-size: 17px; line-height: 1.25; }
+.wd-row.current { background: var(--sun); }
+.wd-row:disabled { opacity: .55; cursor: default; }
+.wd-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wd-row.st-new { border-left-color: var(--orange); } .wd-row.st-working { border-left-color: var(--sky-deep); } .wd-row.st-sent { border-left-color: var(--ok); } .wd-row.st-checked { border-left-color: var(--mint-deep); } .wd-row.st-live { border-left-color: var(--teal); }

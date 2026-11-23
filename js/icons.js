@@ -41,6 +41,7 @@ const P = {
   image: '<path d="M3 5h18v14H3z"/><circle cx="9" cy="10" r="2"/><path d="M3 17l5-5 4 4 3-3 6 6"/>',
   sticker: '<path d="M4 4h16v10l-6 6H4z"/><path d="M20 14h-6v6"/><circle cx="9" cy="10" r="1.2"/><circle cx="14" cy="10" r="1.2"/><path d="M8.5 14c1 1.2 3.5 1.2 4.5 0"/>',
   tape: '<path d="M2 7l2 1.5L2 10l2 1.5L2 13l2 1.5L2 16h20l-2-1.5 2-1.5-2-1.5 2-1.5-2-1.5L22 7z"/><path d="M7 7v9M12 7v9M17 7v9"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
 };
 

@@ -26,6 +26,19 @@ const MESSAGES = {
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
 
+// the list of all of a student's work, for the bar that slides out from the left of a board
+function workPanelDom(boards, currentCode, pick) {
+  const row = b => {
+    const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, cur = !!b.code && b.code === currentCode, d = dueInfo(b.due_at, b.status);
+    return h('button', { class: 'wd-row ' + cls + (cur ? ' current' : ''), disabled: locked, onclick: () => pick(b) },
+      h('b', null, b.title),
+      h('span', { class: 'wd-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'), d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null),
+      h('span', { class: 'bc-status' }, cur ? 'You are here' : locked ? 'Not open yet' : label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : '')));
+  };
+  const todo = boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort), done = boards.filter(b => b.status === 'sent' || b.status === 'checked');
+  return h('div', { class: 'wd-body' }, todo.length ? h('h3', null, 'To do') : null, todo.map(row), done.length ? h('h3', null, 'Sent') : null, done.map(row), boards.length ? null : h('p', { class: 'hint', style: { padding: '14px' } }, 'No work yet.'));
+}
+
 // how soon is it due: "Overdue", "Due today", "Due tomorrow", or the date
 function dueInfo(due_at, status) {
   if (!due_at || status === 'sent' || status === 'checked') return null;
@@ -196,14 +209,14 @@ function askCode(root) {
 
 
 // open one board (used by the class page)
-async function enterBoard({ sb, root, code, name, pin, onBack }) {
+async function enterBoard({ sb, root, code, name, pin, onBack, workPanel = null, onSwitch = null }) {
   try {
     const { data, error } = await sb.rpc('join_board', { p_code: code, p_name: name, p_pin: pin || null });
     if (error) throw error;
     if (data && data.error) throw new Error(data.error);
     const store = new Store(sb, { boardId: data.board_id, role: 'student', participantId: data.participant_id, name: data.name });
     await store.load(); await store.connect();
-    new BoardView({ sb, store, role: 'student', root, code, onBack, onExit: () => {} }).start();
+    new BoardView({ sb, store, role: 'student', root, code, onBack, onExit: () => {}, workPanel, onSwitch }).start();
     return null;
   } catch (e) { console.error(e); const m = (e && e.message) || ''; return { key: Object.keys(MESSAGES).find(k => m.includes(k)) || '', text: msgFor(e) }; }
 }
@@ -283,6 +296,10 @@ export async function startClass(root, classCode) {
   function showBoards(data, name, pin) {
     clearInterval(classPoll);
     const refresh = async () => { clearInterval(classPoll); const r = await portal(name, pin); if (r.data) showBoards(r.data, name, pin); };
+    const work = {
+      workPanel: async ({ currentCode, pick }) => { const r = await portal(name, pin); return workPanelDom(r.data ? r.data.boards : data.boards, currentCode, pick); },
+      onSwitch: async b => { const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work }); if (r) toast(r.text, 'bad'); },
+    };
     const newsKey = `bem-checked-class-${classCode}-${name}`, news = checkedNews(data.boards, newsKey);
     const card = b => {
       const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b);
@@ -293,7 +310,7 @@ export async function startClass(root, classCode) {
           h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
         h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
           const btn = e.currentTarget; btn.disabled = true; clearInterval(classPoll);
-          const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
+          const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
           if (r) { btn.disabled = false; toast(r.text, 'bad'); }
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : 'Open'));
     };
@@ -319,9 +336,11 @@ export async function startClass(root, classCode) {
 
 // a student's own page: one private link, one code, and every piece of work made for that student.
 // Work that has not been started yet is marked NEW and moves, so it is clear what to do.
-export async function startMe(root, pageCode) {
+export async function startMe(root, pageCode, opts = {}) {
   pageCode = pageCode.toUpperCase();
-  const sb = makeClient('student');
+  // the teacher can open any student's page as the student sees it, without the code (only where the teacher is signed in)
+  let asTeacher = !!opts.asTeacher, sb = makeClient(asTeacher ? 'teacher' : 'student');
+  if (asTeacher) { const { data: { session } } = await sb.auth.getSession(); if (!session) { asTeacher = false; sb = makeClient('student'); } }
   const slot = new URLSearchParams(location.search).get('slot') || '';
   const saveKey = `bem-me-${pageCode}-${slot}`;
   const page = (cls, ...kids) => root.replaceChildren(h('div', { class: 'entry student ' + cls }, h('div', { class: 'side' }, brand(true), ...kids), h('div', { class: 'art', 'aria-hidden': 'true' }, artSvg())));
@@ -330,7 +349,7 @@ export async function startMe(root, pageCode) {
   let info;
   try {
     const { data: { session } } = await sb.auth.getSession();
-    if (!session) { const { error } = await sb.auth.signInAnonymously(); if (error) throw error; }
+    if (!session && !asTeacher) { const { error } = await sb.auth.signInAnonymously(); if (error) throw error; }
     const r = await sb.rpc('get_student_page', { p_page: pageCode });
     if (r.error) throw r.error;
     info = r.data;
@@ -344,6 +363,7 @@ export async function startMe(root, pageCode) {
   let savedPin = null; try { savedPin = localStorage.getItem(saveKey); } catch (e) { /* ignore */ }
   const forget = () => { try { localStorage.removeItem(saveKey); } catch (e) { /* ignore */ } savedPin = null; };
   const portal = async pin => {
+    if (asTeacher) { const { data, error } = await sb.rpc('teacher_student_portal', { p_page: pageCode }); return error ? { err: friendlyError(error) } : { data }; }
     const { data, error } = await sb.rpc('student_portal', { p_page: pageCode, p_pin: pin });
     if (error) return { err: friendlyError(error) };
     if (data.error) return { err: MESSAGES[data.error] || 'Try again.' };
@@ -375,6 +395,12 @@ export async function startMe(root, pageCode) {
   // ---- the small idea board in the top right corner: write or draw anything, it saves by itself
   let ideaTimer = null, ideaPoll = null, ideaFlush = null, boardsPoll = null;
   const stopIdea = () => { clearInterval(boardsPoll); clearInterval(ideaPoll); clearTimeout(ideaTimer); ideaPoll = null; if (ideaFlush) { ideaFlush(); ideaFlush = null; } };
+  // what the student wrote on their small board, shown to the teacher without being able to change it
+  function ideaReadOnly(idea) {
+    idea = idea || { strokes: [], tstrokes: [] };
+    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: '', readonly: true });
+    return h('div', { class: 'idea-slot' }, h('div', { class: 'idea-wrap' }, box.el, h('div', { class: 'idea-foot' }, h('span', { class: 'idea-status' }, `What ${name} wrote for you`)), idea.reply ? h('p', { class: 'idea-reply' }, idea.reply) : null));
+  }
   function ideaPanel(idea, pin) {
     idea = idea || { strokes: [], tstrokes: [], reply: null, reply_at: null };
     const seenKey = `bem-idea-seen-${pageCode}`;
@@ -423,7 +449,11 @@ export async function startMe(root, pageCode) {
   function showBoards(data, pin) {
     stopIdea();
     const refresh = async () => { stopIdea(); const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
-    const newsKey = `bem-checked-${pageCode}`, news = checkedNews(data.boards, newsKey);
+    const work = {
+      workPanel: async ({ currentCode, pick }) => { const r = await portal(pin); return workPanelDom(r.data ? r.data.boards : data.boards, currentCode, pick); },
+      onSwitch: async b => { const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work }); if (r) toast(r.text, 'bad'); },
+    };
+    const newsKey = `bem-checked-${pageCode}`, news = asTeacher ? [] : checkedNews(data.boards, newsKey);
     const card = b => {
       const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b), fresh = (b.status === 'new' && !locked) || isNews;
       return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
@@ -435,7 +465,8 @@ export async function startMe(root, pageCode) {
           h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
         h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
           const btn = e.currentTarget; btn.disabled = true;
-          stopIdea(); const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
+          if (asTeacher) { location.hash = '#/board/' + b.id; return; }     // the teacher opens it in her own screens
+          stopIdea(); const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
           if (r) { btn.disabled = false; toast(r.text, 'bad'); }
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : fresh ? 'Start' : 'Open'));
     };
@@ -443,9 +474,10 @@ export async function startMe(root, pageCode) {
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort);
     const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
+      asTeacher ? h('div', { class: 'teacher-preview', role: 'status' }, h('span', null, `You are looking at ${data.name}'s page, the way ${data.name} sees it. No code needed.`), h('button', { class: 'btn sm', onclick: () => { location.hash = '#/'; } }, 'Back to my students')) : null,
       h('div', { class: 'me-top' },
-        h('div', { class: 'join-head' }, h('p', { class: 'hint' }, 'Your page'), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
-        ideaPanel(data.idea, pin)),
+        h('div', { class: 'join-head' }, h('p', { class: 'hint' }, asTeacher ? `${data.name}'s page` : 'Your page'), h('h1', null, asTeacher ? data.name : `Hi, ${data.name}!`), teacherTag()),
+        asTeacher ? ideaReadOnly(data.idea) : ideaPanel(data.idea, pin)),
       fresh.length ? h('div', { class: 'new-banner', role: 'status' }, h('span', { class: 'new-badge' }, 'NEW'), fresh.length === 1 ? 'You have 1 new thing to do!' : `You have ${fresh.length} new things to do!`) : null,
       h('div', { class: 'me-grid' + (data.apps && data.apps.length ? '' : ' no-apps') },
         appsSection(data.apps, `bem-seen-${pageCode}`),
@@ -453,13 +485,14 @@ export async function startMe(root, pageCode) {
         data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
         todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
         done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
-        h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
+        h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), asTeacher ? null : h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
     // the page notices by itself when the teacher checks something (a quiet look once a minute; the idea board is saved first)
     const sig = d => JSON.stringify(d.boards.map(x => [x.id, x.status, x.checked_at, x.score, x.code ? 1 : 0, x.title, x.due_at])), base = sig(data);
     boardsPoll = setInterval(async () => { if (document.hidden) return; const r = await portal(pin); if (r.data && sig(r.data) !== base) { stopIdea(); showBoards(r.data, pin); } }, 60000);
   }
 
+  if (asTeacher) { const r = await portal(); if (r.data) return showBoards(r.data, null); return page('', h('div', { class: 'notice bad' }, r.err || 'Could not open this page.'), h('button', { class: 'btn', onclick: () => { location.hash = '#/'; } }, 'Back to my students')); }
   if (savedPin) { const r = await portal(savedPin); if (r.data) return showBoards(r.data, savedPin); forget(); }
   showCode();
 }

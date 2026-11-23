@@ -40,8 +40,8 @@ const MIN_S = 0.12, MAX_S = 8;
 
 export class BoardView {
   // embedded: the review screen owns the store; studentNav: { name, index, count, prev(), next(), back() } for a teacher looking at one student's copy
-  constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null, onBack = null }) {
-    Object.assign(this, { sb, store, role, root, onExit, code, embedded, studentNav, onBack });
+  constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null, onBack = null, workPanel = null, onSwitch = null }) {
+    Object.assign(this, { sb, store, role, root, onExit, code, embedded, studentNav, onBack, workPanel, onSwitch });
     this.isTeacher = role === 'teacher';
     this.assign = store.mode === 'assignment';
     this.review = this.isTeacher && this.assign;        // teacher looking at one student's copy
@@ -128,7 +128,9 @@ export class BoardView {
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
     this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
     this.elSide = h('aside', { class: 'b-side' });
-    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.stage, this.elSide, this.elOpts, this.fileInput);
+    this.drawer = h('aside', { class: 'work-drawer', 'aria-label': 'My work', hidden: true });
+    this.drawerBack = h('div', { class: 'work-back', hidden: true, onclick: () => this.closeWork() });
+    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.stage, this.elSide, this.elOpts, this.fileInput, this.drawerBack, this.drawer);
     this.root.replaceChildren(this.el);
 
     const s = this.stage;
@@ -201,6 +203,7 @@ export class BoardView {
       }
       Rt.push(this.btnPages);
     }
+    if (this.workPanel && !this.isTeacher) L.unshift(tb('menu', 'My work', () => this.openWork()));     // a student: the list of all their work, in a bar that slides out from the left
     L.splice(L.indexOf(this.elStatus) + 1, 0, this.timerCtl.el);
     this.tbLeft.replaceChildren(...L); this.tbRight.replaceChildren(...Rt);
     this.renderStatus(st.sync);
@@ -1314,6 +1317,18 @@ export class BoardView {
     if (!this.panel) return;
     if (this.panel === 'pages') this.renderPagesPanel(); else this.renderPeoplePanel();
   }
+
+  // ---- "My work": a bar that slides out from the left with every piece of work, to jump to another one
+  async openWork() {
+    if (!this.workPanel) return;
+    const head = h('header', null, h('h2', null, 'My work'), h('button', { class: 'ib', 'aria-label': 'Close', onclick: () => this.closeWork() }, iconEl('close')));
+    this.drawer.hidden = false; this.drawerBack.hidden = false; this.drawer.replaceChildren(head, h('p', { class: 'hint', style: { padding: '14px' } }, 'Loading…'));
+    requestAnimationFrame(() => this.drawer.classList.add('open'));
+    try { const body = await this.workPanel({ currentCode: this.code, pick: b => { this.closeWork(); this.switchBoard(b); } }); this.drawer.replaceChildren(head, body); }
+    catch (e) { this.drawer.replaceChildren(head, h('p', { class: 'error', style: { padding: '14px' } }, 'Could not load your work. Check your internet.')); }
+  }
+  closeWork() { this.drawer.classList.remove('open'); this.drawerBack.hidden = true; setTimeout(() => { if (!this.drawer.classList.contains('open')) this.drawer.hidden = true; }, 260); }
+  switchBoard(b) { if (!b || b.code === this.code || !this.onSwitch) return; this.destroy(); this.onSwitch(b); }
 
   // ---- a student's own extra pages (assignment copies)
   addMyPageDialog() {

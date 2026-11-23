@@ -1,5 +1,7 @@
 // Cute stickers, paper notes and washi tape, all drawn here with code (no pictures to load).
 // Stickers are drawn once in a 200 x 200 box, given a white "die-cut" edge, and kept as small pictures (sprites).
+import { CHAR_KEYS, GIRLS, BOYS, CHAR_NAMES, drawChar } from './characters.js';
+export { GIRLS, BOYS, CHAR_NAMES, DEFAULT_AVATARS } from './characters.js';
 const TAU = Math.PI * 2;
 const INK = '#5B4046';          // eyes and small marks
 const CHEEK = 'rgba(255,128,150,.55)';
@@ -183,15 +185,16 @@ export const STICKERS = [
   ['heart', 'Heart', 'cute'], ['star', 'Star', 'cute'], ['cloud', 'Cloud', 'cute'], ['rainbow', 'Rainbow', 'cute'], ['bow', 'Bow', 'cute'], ['flower', 'Flower', 'cute'], ['daisy', 'Daisy', 'cute'], ['butterfly', 'Butterfly', 'cute'], ['paw', 'Paw', 'cute'], ['sparkle', 'Sparkles', 'cute'],
   ['strawberry', 'Strawberry', 'yummy'], ['cherry', 'Cherries', 'yummy'], ['cake', 'Cake', 'yummy'], ['boba', 'Bubble tea', 'yummy'], ['milk', 'Milk', 'yummy'], ['icecream', 'Ice cream', 'yummy'], ['toast', 'Toast', 'yummy'], ['macaron', 'Macaron', 'yummy'],
   ['noteGrid', 'Grid note', 'notes'], ['notePlain', 'Plain note', 'notes'], ['noteLined', 'Lined note', 'notes'], ['noteMint', 'Mint note', 'notes'], ['noteYellow', 'Memo', 'notes'], ['noteSpiral', 'Notebook', 'notes'], ['noteCurl', 'Pink note', 'notes'],
-].map(([k, name, group]) => ({ k, name, group }));
-export const STICKER_GROUPS = [['cute', 'Cute'], ['yummy', 'Yummy'], ['notes', 'Notes']];
+].map(([k, name, group]) => ({ k, name, group })).concat(CHAR_KEYS.map(k => ({ k, name: CHAR_NAMES[k], group: 'people' })));
+export const STICKER_GROUPS = [['cute', 'Cute'], ['people', 'People'], ['yummy', 'Yummy'], ['notes', 'Notes']];
 // the faces that can be used as a student's picture
-export const AVATARS = ['bunny', 'bear', 'cat', 'dog', 'chick', 'frog', 'panda', 'pig'];
+export const ANIMAL_AVATARS = ['bunny', 'bear', 'cat', 'dog', 'chick', 'frog', 'panda', 'pig'];
+export const AVATARS = [...CHAR_KEYS, ...ANIMAL_AVATARS];
 
 // ---------------------------------------------------------------- sprites: the picture with a white die-cut edge
 const SPR = new Map(), PAD = 16, BOX = 200;
 function make(k) {
-  const fn = D[k]; if (!fn) return null;
+  const fn = D[k] || (CHAR_KEYS.includes(k) ? g => drawChar(g, k) : null); if (!fn) return null;
   const body = document.createElement('canvas'); body.width = body.height = BOX + PAD * 2;
   const g = body.getContext('2d'); g.translate(PAD, PAD); fn(g);
   const out = document.createElement('canvas'); out.width = out.height = BOX + PAD * 2;
@@ -215,7 +218,8 @@ export function drawSticker(ctx, k, x, y, w, h) {
 export function avatarCanvas(k, size, bg = '#FFE3EC') {
   const c = document.createElement('canvas'); c.width = c.height = Math.round(size * 2); c.style.width = c.style.height = size + 'px';
   const g = c.getContext('2d'); g.beginPath(); g.arc(c.width / 2, c.width / 2, c.width / 2, 0, TAU); g.fillStyle = bg; g.fill(); g.save(); g.clip();
-  const s = stickerSprite(k); if (s) { const m = c.width * 0.9, off = (c.width - m) / 2; g.drawImage(s, off, off + c.width * 0.02, m, m); }
+  if (CHAR_KEYS.includes(k)) { const t = document.createElement('canvas'); t.width = t.height = 200; drawChar(t.getContext('2d'), k); const m = c.width * 1.06; g.drawImage(t, (c.width - m) / 2, c.width * 0.02, m, m); }
+  else { const s = stickerSprite(k); if (s) { const m = c.width * 0.9, off = (c.width - m) / 2; g.drawImage(s, off, off + c.width * 0.02, m, m); } }
   g.restore(); return c;
 }
 

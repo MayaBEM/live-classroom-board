@@ -11,7 +11,7 @@ import { boardStudentsDialog, checklist } from './members.js';
 import { importLibraryDialog } from './library.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
 import { IdeaBoard, STUDENT_INK, TEACHER_INK } from './idea.js';
-import { AVATARS, avatarCanvas } from './stickers.js';
+import { AVATARS, ANIMAL_AVATARS, GIRLS, BOYS, DEFAULT_AVATARS, CHAR_NAMES, avatarCanvas } from './stickers.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
 const AVATAR_BG = ['#FFE3EC', '#E1F0FF', '#E4F6E1', '#FFF1C7', '#EDE3FF'];
@@ -318,7 +318,7 @@ export class TeacherApp {
 
   // the one list of all my students
   // ---- Home: every student as a friendly profile (a picture, a name, and what needs a look)
-  avatarKey(m) { const i = Math.max(0, this.master.findIndex(x => x.id === m.id)); return (m.avatar && AVATARS.includes(m.avatar)) ? m.avatar : AVATARS[i % AVATARS.length]; }
+  avatarKey(m) { const i = Math.max(0, this.master.findIndex(x => x.id === m.id)); return (m.avatar && AVATARS.includes(m.avatar)) ? m.avatar : DEFAULT_AVATARS[i % DEFAULT_AVATARS.length]; }
   avatarEl(m, size = 84) { const i = Math.max(0, this.master.findIndex(x => x.id === m.id)); const c = avatarCanvas(this.avatarKey(m), size, AVATAR_BG[i % AVATAR_BG.length]); c.setAttribute('role', 'img'); c.setAttribute('aria-label', m.first_name + ' picture'); return c; }
   // work of a student that was sent in and waits for the teacher
   toCheckOf(m) {
@@ -327,11 +327,20 @@ export class TeacherApp {
   }
   avatarDialog(m) {
     const cur = this.avatarKey(m);
-    const grid = h('div', { class: 'avatar-pick' }, AVATARS.map((k, i) => h('button', { class: 'avatar-opt', 'aria-pressed': String(k === cur), 'aria-label': k, title: k, onclick: async () => {
-      const { error } = await this.sb.from('students').update({ avatar: k }).eq('id', m.id);
-      if (error) return toast(friendlyError(error), 'bad');
-      dlg.close(); m.avatar = k; await this.refresh(); } }, avatarCanvas(k, 72, AVATAR_BG[i % AVATAR_BG.length]))));
-    const dlg = modal({ title: `Picture for ${m.first_name}`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Pick a picture. It shows on your home page so you can find them fast.'), grid), actions: [h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')] });
+    let group = GIRLS.includes(cur) ? 'girls' : BOYS.includes(cur) ? 'boys' : ANIMAL_AVATARS.includes(cur) ? 'animals' : 'girls';
+    const groups = [['girls', 'Girls', GIRLS], ['boys', 'Boys', BOYS], ['animals', 'Animals', ANIMAL_AVATARS]];
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Kind of picture' });
+    const grid = h('div', { class: 'avatar-pick' });
+    const draw = () => {
+      seg.replaceChildren(...groups.map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(group === k), onclick: () => { group = k; draw(); } }, label)));
+      const list = groups.find(x => x[0] === group)[2];
+      grid.replaceChildren(...list.map((k, i) => h('button', { class: 'avatar-opt', 'aria-pressed': String(k === cur), 'aria-label': CHAR_NAMES[k] || k, title: CHAR_NAMES[k] || k, onclick: async () => {
+        const { error } = await this.sb.from('students').update({ avatar: k }).eq('id', m.id);
+        if (error) return toast(friendlyError(error), 'bad');
+        dlg.close(); m.avatar = k; await this.refresh(); } }, avatarCanvas(k, 76, AVATAR_BG[i % AVATAR_BG.length]))));
+    };
+    draw();
+    const dlg = modal({ title: `Picture for ${m.first_name}`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Pick a picture. It shows on your home page so you can find them fast.'), seg, h('div', { style: { marginTop: '12px' } }, grid)), actions: [h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')] });
   }
   addStudentsDialog() {
     const input = h('input', { class: 'input', id: 'ns', placeholder: 'First names, like: Mia, Ben, Nok', 'aria-label': 'First names' });
@@ -444,7 +453,7 @@ export class TeacherApp {
         h('div', { class: 'share-actions' },
           h('button', { class: 'btn primary', onclick: () => copy(studentPageMessage({ name: m.first_name, link, code: m.code, teacher }), `Message for ${m.first_name} copied.`) }, iconEl('copy', 18), `Copy message for ${m.first_name}`),
           h('button', { class: 'btn', onclick: () => copy(link, 'Link copied.') }, iconEl('link', 18), 'Copy link only'),
-          h('a', { class: 'btn', href: link, target: '_blank', rel: 'noopener' }, `See ${m.first_name}'s page`))));
+          h('a', { class: 'btn', href: link + '/t', target: '_blank', rel: 'noopener', title: 'Opens their page as they see it. No code needed.' }, `See ${m.first_name}'s page`))));
     const work = h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `Work for ${m.first_name}`), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog({ forStudent: m }) }, iconEl('plus', 18), 'Add work')),
       mine.length ? mine.map(row) : h('div', { class: 'empty' }, h('b', null, 'No work yet. '), `Press Add work, then upload a worksheet or start with a blank page. ${m.first_name} sees it as NEW.`));
