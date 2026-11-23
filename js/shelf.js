@@ -2,6 +2,7 @@
 import { h, modal, toast } from './util.js';
 import { friendlyError } from './db.js';
 import { checklist } from './members.js';
+import { libraryPicker, libraryCover, shortTitle } from './library.js';
 
 // a picture file -> a small square JPEG (as a data address) that is cheap to send to every student
 export async function coverFromFile(file, focusX = 0.5) {
@@ -55,9 +56,20 @@ export function appDialog({ sb, master, app = null, have = new Set(), preselect 
   file.addEventListener('change', async () => { const f = file.files && file.files[0]; if (!f) return; err.textContent = ''; try { cover = await coverFromFile(f); drawCover(); } catch (e) { err.textContent = friendlyError(e); } file.value = ''; });
   drawCover();
   const go = h('button', { class: 'btn primary' }, app ? 'Save' : 'Add to my shelf');
+  // a new app can be picked from the library: its name, cover and (when known) link are filled in
+  const picked = h('p', { class: 'hint', style: { margin: '6px 0 0' }, role: 'status' });
+  const libPick = app ? null : libraryPicker({ onPick: async a => {
+    title.value = shortTitle(a.title);
+    url.value = a.url || '';           // never keep the link of the app picked before
+    cover = null; drawCover(); err.textContent = '';
+    picked.textContent = a.url ? `Filled in from your library: ${shortTitle(a.title)}. Check the name, then add it.` : `Filled in the name and picture. The library keeps this app private, so paste its link below.`;
+    try { const c = await libraryCover(a); if (c) { cover = c; drawCover(); } } catch (e) { /* the picture is optional */ }
+    (a.url ? title : url).focus();
+  } });
   const m = modal({
     title: app ? 'Change app' : 'Add an app to my shelf', wide: true,
     body: h('div', null,
+      libPick ? h('details', { class: 'field lib-details', open: true }, h('summary', { class: 'label', style: { cursor: 'pointer' } }, 'Pick from my library'), libPick.el, picked) : null,
       h('div', { class: 'field' }, h('label', { for: 'ap-t' }, 'Name'), title),
       h('div', { class: 'field' }, h('label', { for: 'ap-u' }, 'Link to the app'), url, h('span', { class: 'hint' }, 'The web address of your app or game. Students tap it and it opens in a new tab.')),
       h('div', { class: 'field' }, h('label', { for: 'ap-n' }, 'Note for the student'), note),
