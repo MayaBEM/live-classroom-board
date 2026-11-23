@@ -2,11 +2,9 @@
 
 export const PEN_COLORS = [
   ['Black', '#1D2127'], ['Blue', '#1F5FBF'], ['Red', '#D62F2F'], ['Green', '#1F8A4C'],
-  ['Orange', '#EE7A1C'], ['Brown', '#7A4A2A'], ['Teal', '#0E8A9A'], ['Pink', '#D9488F'],
-  ['Purple', '#7A3FA0'], ['Navy', '#23308F'], ['Gold', '#E0A800'], ['Lime', '#6BA82E'], ['Sky', '#2EA3DB'], ['Grey', '#6B7480'],
 ];
-// In an assignment, red is kept for the teacher's feedback, so students do not get red (purple and the others are there)
-export const STUDENT_ASSIGN_COLORS = PEN_COLORS.filter(c => c[0] !== 'Red');
+// In an assignment, red is kept for the teacher's feedback, so students get purple instead
+export const STUDENT_ASSIGN_COLORS = PEN_COLORS.map(c => c[0] === 'Red' ? ['Purple', '#7A3FA0'] : c);
 // a colour a person chose with the colour picker: "#RRGGBB" only
 export const isHex = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
 // is this colour a red (the teacher's feedback colour)?
@@ -18,8 +16,7 @@ export function isRedish(hex) {
   return hue < 16 || hue > 344;
 }
 export const HL_COLORS = [
-  ['Yellow', '#FFE45C'], ['Lime', '#B8E65C'], ['Green', '#6FD39A'], ['Cyan', '#6FD8E8'],
-  ['Blue', '#8DB7FF'], ['Pink', '#FF9EC4'], ['Orange', '#FFB566'], ['Grey', '#C9CFD6'],
+  ['Yellow', '#FFE45C'], ['Green', '#6FD39A'], ['Blue', '#8DB7FF'], ['Pink', '#FF9EC4'],
 ];
 export const PEN_SIZES = [2.6, 4.8, 9];
 export const HL_SIZES = [14, 24, 38];

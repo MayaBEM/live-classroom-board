@@ -70,7 +70,7 @@ export class IdeaBoard {
     this.btnUndo = mk('undo', 'Undo', 'undo', () => this.undo());
     this.btnClear = mk('clear', 'Clear my writing', 'trash', () => this.clear());
     this.btnPencil = mk('pencilonly', 'Pencil only', 'hand', () => pencil.toggle());
-    this.dots = Array.isArray(this.ink) ? this.ink.map((c, i) => { const d = h('button', { type: 'button', class: 'ib dot', 'aria-label': 'Colour ' + (i + 1), onclick: () => { this.colour = i; this.tool = 'pen'; this.refreshBar(); } }); d.style.setProperty('--c', c); return d; }) : [];
+    this.dots = Array.isArray(this.ink) ? this.ink.slice(0, 4).map((c, i) => { const d = h('button', { type: 'button', class: 'ib dot', 'aria-label': 'Colour ' + (i + 1), onclick: () => { this.colour = i; this.tool = 'pen'; this.refreshBar(); } }); d.style.setProperty('--c', c); return d; }) : [];
     // any colour of your own
     this.picker = h('input', { type: 'color', class: 'sw-input', 'aria-label': 'Choose any colour', value: '#1f5fbf' });
     this.picker.addEventListener('input', () => { this.colour = this.picker.value; this.tool = 'pen'; this.refreshBar(); });
