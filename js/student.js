@@ -9,6 +9,7 @@ import { iconEl } from './icons.js';
 import { CONFIG } from '../config.js';
 import { appThumb } from './shelf.js';
 import { IdeaBoard } from './idea.js';
+import { coverBox, fillCovers } from './covers.js';
 
 const MESSAGES = {
   NAME_IN_USE: 'Someone is using that name right now. Add the first letter of your last name, like "Emma K".',
@@ -352,6 +353,7 @@ export async function startClass(root, classCode) {
     const card = b => {
       const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b);
       return h('div', { class: 'bcard ' + cls + (isNews ? ' is-new' : '') },
+        coverBox(b.id),
         h('div', { class: 'bc-main' }, h('b', null, isNews ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
           h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
             b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
@@ -373,6 +375,7 @@ export async function startClass(root, classCode) {
           done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
           h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
+    fillCovers(sb, data.boards.map(b => b.id));
     // the page notices by itself when the teacher checks something (a quiet look once a minute)
     const sig = d => JSON.stringify(d.boards.map(x => [x.id, x.status, x.checked_at, x.score, x.code ? 1 : 0, x.title, x.due_at])), base = sig(data);
     classPoll = setInterval(async () => { if (document.hidden) return; const r = await portal(name, pin); if (r.data && sig(r.data) !== base) { clearInterval(classPoll); showBoards(r.data, name, pin); } }, 60000);
@@ -505,6 +508,7 @@ export async function startMe(root, pageCode, opts = {}) {
     const card = b => {
       const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b), fresh = (b.status === 'new' && !locked) || isNews;
       return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
+        coverBox(b.id),
         h('div', { class: 'bc-main' },
           h('b', null, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
           h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
@@ -535,6 +539,7 @@ export async function startMe(root, pageCode, opts = {}) {
         done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
         h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), asTeacher ? null : h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
+    fillCovers(sb, data.boards.map(b => b.id));
     // the page notices by itself when the teacher checks something (a quiet look once a minute; the idea board is saved first)
     const sig = d => JSON.stringify(d.boards.map(x => [x.id, x.status, x.checked_at, x.score, x.code ? 1 : 0, x.title, x.due_at])), base = sig(data);
     boardsPoll = setInterval(async () => { if (document.hidden) return; const r = await portal(pin); if (r.data && sig(r.data) !== base) { stopIdea(); showBoards(r.data, pin); } }, 60000);

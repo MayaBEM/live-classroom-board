@@ -142,21 +142,52 @@ export class Instruments {
     return { R, h };
   }
   compassSvg(p, upm, hr, remote) {
-    const { R, h } = this.compassGeom(p), col = remote ? '#1F6F78' : '#1D2127', pen = remote ? '#1F6F78' : this.view.color || '#1D2127';
+    const { R, h } = this.compassGeom(p), col = remote ? '#1F6F78' : '#1D2127', pen = remote ? '#1F6F78' : (this.view.color || '#1D2127');
+    const Hh = [R / 2, -h], u = clamp(Math.hypot(R / 2, h) * 0.05, 4.5, 11);
+    const MET = '#BFC6CE', EDGE = '#4A525A', LIGHT = '#F2F5F8', DARK = '#7D858E';
+    const P = (x, y) => f(x) + ',' + f(y);
+    // a leg piece that gets narrower from A to B (wa, wb: widths; off: slide sideways, used for the shiny stripe)
+    const tseg = (A, B, wa, wb, off = 0) => {
+      const dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+      return [[A[0] + nx * (off + wa / 2), A[1] + ny * (off + wa / 2)], [B[0] + nx * (off + wb / 2), B[1] + ny * (off + wb / 2)], [B[0] + nx * (off - wb / 2), B[1] + ny * (off - wb / 2)], [A[0] + nx * (off - wa / 2), A[1] + ny * (off - wa / 2)]].map(q => P(q[0], q[1])).join(' ');
+    };
+    const poly = (pts, fill, stroke, sw = 1) => `<polygon points="${pts}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round" vector-effect="non-scaling-stroke" style="pointer-events:none"/>`;
+    const at = (A, B, t) => [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t];
+    const leg = (T, pencil) => {
+      const K = at(Hh, T, 0.58), C0 = at(Hh, T, pencil ? 0.76 : 0.80), C1 = at(Hh, T, pencil ? 0.83 : 0.86);
+      let o = poly(tseg(Hh, K, 2.3 * u, 1.7 * u), MET, EDGE) + poly(tseg(Hh, K, 0.45 * u, 0.3 * u, -0.45 * u), LIGHT, 'none', 0);
+      o += poly(tseg(K, C0, 1.5 * u, 1.2 * u), MET, EDGE) + poly(tseg(K, C0, 0.35 * u, 0.25 * u, -0.3 * u), LIGHT, 'none', 0);
+      o += `<circle cx="${f(K[0])}" cy="${f(K[1])}" r="${f(1.05 * u)}" fill="${DARK}" stroke="${EDGE}" stroke-width="1" vector-effect="non-scaling-stroke" style="pointer-events:none"/><path d="M${P(K[0] - 0.55 * u, K[1])}H${f(K[0] + 0.55 * u)}" stroke="${EDGE}" stroke-width="1" vector-effect="non-scaling-stroke" style="pointer-events:none"/>`;
+      if (pencil) {
+        const L0 = at(Hh, T, 0.94);
+        o += poly(tseg(C0, C1, 1.9 * u, 1.9 * u), '#5A626B', EDGE);                                  // the clamp
+        o += poly(tseg(C1, L0, 1.35 * u, 0.55 * u), '#E8C998', '#9A6A2E');                          // the sharpened wood
+        o += poly(tseg(L0, T, 0.55 * u, 0.06 * u), pen, EDGE);                                      // the lead (the colour you write with)
+      } else {
+        o += poly(tseg(C0, C1, 1.8 * u, 1.8 * u), '#8A929B', EDGE);                                  // the collar
+        o += poly(tseg(C1, T, 0.9 * u, 0.1 * u), '#DDE2E7', EDGE);                                   // the steel needle
+      }
+      return o;
+    };
+    const kx = Hh[0], ky = Hh[1] - 4.8 * u, kr = 2.3 * u;
+    let ribs = ''; for (let i = 0; i < 14; i++) { const a = i * Math.PI / 7; ribs += `M${P(kx + Math.cos(a) * kr * 0.72, ky + Math.sin(a) * kr * 0.72)}L${P(kx + Math.cos(a) * kr, ky + Math.sin(a) * kr)}`; }
+    const hinge = `<rect x="${f(kx - 0.65 * u)}" y="${f(ky)}" width="${f(1.3 * u)}" height="${f(4.8 * u)}" fill="${MET}" stroke="${EDGE}" stroke-width="1" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <circle cx="${f(kx)}" cy="${f(ky)}" r="${f(kr)}" fill="${DARK}" stroke="${EDGE}" stroke-width="1.2" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <path d="${ribs}" stroke="${LIGHT}" stroke-width="1" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <circle cx="${f(Hh[0])}" cy="${f(Hh[1])}" r="${f(1.9 * u)}" fill="${MET}" stroke="${EDGE}" stroke-width="1.2" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <circle cx="${f(Hh[0])}" cy="${f(Hh[1])}" r="${f(0.75 * u)}" fill="${DARK}" stroke="${EDGE}" stroke-width="1" vector-effect="non-scaling-stroke" style="pointer-events:none"/>`;
     const cm = Math.round(R / upm / 5) * 5 / 10, label = `r = ${cm} cm`, fs = Math.max(11, hr * 0.95), bw = fs * (label.length * 0.58 + 1);
-    const hx = f(R / 2), hy = f(-h), lx = f(R / 2), ly = f(-h - hr * 2.7);
+    const lx = f(kx), ly = f(ky - kr - hr * 1.7);
     const handles = remote ? '' : `
       <circle data-k="compass" data-h="rot" cx="${f(-hr * 3)}" cy="0" r="${f(hr)}" fill="#D5E8E9" stroke="#1F6F78" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:alias"/>
       <path d="M${f(-hr * 3 - hr * 0.45)} ${f(-hr * 0.1)}a${f(hr * 0.45)} ${f(hr * 0.45)} 0 1 1 ${f(hr * 0.9)} 0" fill="none" stroke="#1F6F78" stroke-width="2" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
-      <rect data-k="compass" data-h="size" x="${f(R / 2 - hr)}" y="${f(-h - hr)}" width="${f(hr * 2)}" height="${f(hr * 2)}" fill="#fff" stroke="#1D2127" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:ew-resize"/>
-      <circle data-k="compass" data-h="draw" cx="${f(R)}" cy="0" r="${f(hr * 1.15)}" fill="#FF9150" stroke="#1D2127" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:crosshair"/>`;
+      <circle data-k="compass" data-h="size" cx="${f(kx)}" cy="${f(ky)}" r="${f(Math.max(kr + 3, hr * 1.1))}" fill="rgba(255,255,255,0.01)" stroke="#1F6F78" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" style="cursor:ew-resize"/>
+      <circle data-k="compass" data-h="draw" cx="${f(R)}" cy="0" r="${f(hr * 1.15)}" fill="rgba(255,145,80,0.28)" stroke="#FF9150" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:crosshair"/>`;
     return `<g class="instr ${remote ? 'remote' : ''}" transform="translate(${f(p.x)} ${f(p.y)}) rotate(${f(p.rot)})" style="pointer-events:${remote ? 'none' : 'auto'}">
       <line x1="0" y1="0" x2="${f(R)}" y2="0" stroke="${col}" stroke-width="1" stroke-dasharray="6 5" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
-      <line data-k="compass" data-h="move" x1="0" y1="0" x2="${hx}" y2="${hy}" stroke="transparent" stroke-width="22" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:${remote ? 'none' : 'stroke'};cursor:move"/>
-      <line x1="0" y1="0" x2="${hx}" y2="${hy}" stroke="#6a727b" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
-      <line x1="${f(R)}" y1="0" x2="${hx}" y2="${hy}" stroke="${pen}" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
-      <circle cx="0" cy="0" r="${f(hr * 0.5)}" fill="#1D2127" style="pointer-events:none"/>
-      <circle data-k="compass" data-h="move" cx="0" cy="0" r="${f(hr * 1.2)}" fill="rgba(255,255,255,0.01)" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke" style="cursor:move;pointer-events:${remote ? 'none' : 'auto'}"/>
+      ${leg([0, 0], false)}${leg([R, 0], true)}${hinge}
+      <line data-k="compass" data-h="move" x1="0" y1="0" x2="${f(Hh[0])}" y2="${f(Hh[1])}" stroke="transparent" stroke-width="22" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:${remote ? 'none' : 'stroke'};cursor:move"/>
+      <circle data-k="compass" data-h="move" cx="0" cy="0" r="${f(hr * 1.2)}" fill="rgba(255,255,255,0.01)" stroke="#1F6F78" stroke-width="1.5" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" style="cursor:move;pointer-events:${remote ? 'none' : 'auto'}"/>
       <g transform="translate(${lx} ${ly}) rotate(${f(-p.rot)})" style="pointer-events:none">
         <rect x="${f(-bw / 2)}" y="${f(-fs * 0.8)}" width="${f(bw)}" height="${f(fs * 1.6)}" fill="#fff" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
         <text x="0" y="0" font-size="${f(fs)}" font-weight="600" text-anchor="middle" dominant-baseline="middle" fill="${col}">${label}</text>

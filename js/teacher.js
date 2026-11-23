@@ -1,4 +1,5 @@
 // Teacher side: sign-in, dashboard (classes + boards), opening a board.
+import { backfillCovers } from './covers.js';
 import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, classUrl, studentUrl, classShareMessage, studentPageMessage, BASE, makeCodes, makeCode } from './util.js';
 import { CONFIG } from '../config.js';
 import { iconEl } from './icons.js';
@@ -131,6 +132,7 @@ export class TeacherApp {
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
     this.apps = ap.data; this.parts = pt.data || [];
     this.ideaMeta = new Map((im.data || []).map(r => [r.student_id, r]));
+    if (!this._coverBackfill) { this._coverBackfill = true; setTimeout(() => backfillCovers(this.sb).catch(() => {}), 2500); }
     this.appLinks = new Map();
     (sa.data || []).forEach(r => { if (!this.appLinks.has(r.app_id)) this.appLinks.set(r.app_id, new Set()); this.appLinks.get(r.app_id).add(r.student_id); });
     this.members = new Map();

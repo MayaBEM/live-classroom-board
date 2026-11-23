@@ -3,6 +3,7 @@ import { h, uuid, makeCode, modal, toast } from './util.js';
 import { BUCKET, friendlyError } from './db.js';
 import { pdfFromFile, pdfInfo } from './pdf.js';
 import { iconEl } from './icons.js';
+import { saveCover } from './covers.js';
 
 export const PAGE_H = { landscape: 625, portrait: 1414 };
 const MAX_FILE = 50 * 1024 * 1024;
@@ -84,6 +85,7 @@ export async function createBoard(sb, { title, classId, spec, mode = 'live', sta
   if (!board) throw new Error('Could not make a short code. Try again.');
   try { await addPagesToBoard(sb, board.id, 0, spec, progress); }
   catch (e) { await deleteBoard(sb, board.id).catch(() => {}); throw e; }
+  try { await saveCover(sb, board.id); } catch (e) { /* the cover picture is a nice extra: the board is fine without it */ }
   return board;
 }
 
