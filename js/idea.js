@@ -202,7 +202,7 @@ export class IdeaBoard {
         else if (this.cur) { const p = this.cur.p, dx = x - p[p.length - 2], dy = y - p[p.length - 1]; if (dx * dx + dy * dy >= MIN_STEP * MIN_STEP && p.length < MAX_POINTS) p.push(x, y); }
       }
       if (this.tool !== 'eraser') {
-        const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];     // where the pencil is heading: drawn only on screen, never saved
+        const pe = e.pointerType !== 'mouse' && e.getPredictedEvents ? e.getPredictedEvents() : [];     // where the pencil is heading: drawn only on screen, never saved (not for a mouse: it made the end of the line flick)
         let lead = pe.length ? pe.slice(0, 2).flatMap(ev => this.pos(ev)) : null;
         if (!lead && e.pointerType !== 'mouse' && this.cur && this.cur.p.length >= 6) {       // no predicted points (Safari): look a little ahead ourselves
           const q = this.cur.p, n = q.length, vx = (q[n - 2] - q[n - 6]) / 2, vy = (q[n - 1] - q[n - 5]) / 2, sp = Math.hypot(vx, vy);

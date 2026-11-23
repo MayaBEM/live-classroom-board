@@ -964,8 +964,9 @@ export class BoardView {
         if (n >= stride && Math.hypot(p.x - d.p[n - stride], p.y - d.p[n - stride + 1]) < 0.5 / Math.max(.3, this.view.s * 1.2)) continue;
         d.p.push(p.x, p.y); if (stride === 3) d.p.push(ev.pressure || 0.5);
       }
-      const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];
-      this.pred = pe.length ? pe.slice(0, 3).map(ev => this.toPage(ev)) : (e.pointerType === 'mouse' ? null : this.leadPoint(d, stride));   // Safari gives no predicted points: look a little ahead ourselves
+      // a mouse or trackpad gets no look-ahead (it made the end of the line flick); a pencil or finger gets the browser's predicted points, kept short, or our own short look-ahead
+      const pe = e.pointerType === 'mouse' ? [] : (e.getPredictedEvents ? e.getPredictedEvents() : []);
+      this.pred = pe.length ? this.shortLead(pe.slice(0, 2).map(ev => this.toPage(ev)), d, stride) : (e.pointerType === 'mouse' ? null : this.leadPoint(d, stride));
       this.sendCurT(); this.requestLive();
     } else if (this.cur && (SHAPES.has(t) || t === 'tape')) {
       const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;      // (washi tape gets longer as the finger is dragged)
@@ -1041,6 +1042,12 @@ export class BoardView {
     o._b = null; this.scheduleInk();
   }
   // a short way ahead of the pencil, only drawn on screen while writing (never saved): hides the delay between hand and ink
+  // never let the predicted points run more than a few screen pixels past the real end of the line
+  shortLead(list, d, stride) {
+    const p = d.p, n = p.length / stride; if (!n) return null;
+    const lx = p[(n - 1) * stride], ly = p[(n - 1) * stride + 1], k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width, cap = 10 * k;
+    return list.map(q => { const dx = q.x - lx, dy = q.y - ly, L = Math.hypot(dx, dy); return L > cap ? { x: lx + dx / L * cap, y: ly + dy / L * cap } : q; });
+  }
   leadPoint(d, stride) {
     const p = d.p, n = p.length / stride; if (n < 3) return null;
     const x1 = p[(n - 1) * stride], y1 = p[(n - 1) * stride + 1], vx = (x1 - p[(n - 3) * stride]) / 2, vy = (y1 - p[(n - 3) * stride + 1]) / 2, sp = Math.hypot(vx, vy);
