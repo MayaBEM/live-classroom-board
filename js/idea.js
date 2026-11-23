@@ -172,12 +172,8 @@ export class IdeaBoard {
         if (this.down !== null && this.downType === 'touch') stopStroke();       // the hand landed first: the pencil wins
         this.touches.clear(); this.tap.reset();
       } else if (e.pointerType === 'touch') {
-        if (pencil.recent() || (this.down !== null && this.downType === 'pen')) {          // a resting hand ... unless it is one finger put down on purpose while the pencil draws: the line goes straight
-          if (pencil.straight && this.cur && this.down !== null && this.downType === 'pen' && !this.straight && !((e.width || 0) > 30 || (e.height || 0) > 30) && performance.now() - this.downAt > 150) {
-            const q = this.cur.p, n = q.length; this.cur.p = [q[0], q[1], q[n - 2], q[n - 1]]; this.straight = true; this.pred = null; this.queueLive();
-          }
-          return;
-        }
+        this.armStraight(e);                                                         // one finger HELD down makes the line straight
+        if (pencil.recent() || (this.down !== null && this.downType === 'pen')) return;   // a resting hand
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.touches.size >= 2) {                                              // two fingers: not writing
           if (this.down !== null && this.downType === 'touch') stopStroke();
@@ -196,6 +192,7 @@ export class IdeaBoard {
     c.addEventListener('pointermove', e => {
       if (e.pointerType === 'pen' && this.down === e.pointerId) pencil.pen();
       const t = this.touches.get(e.pointerId); if (t) { t.x = e.clientX; t.y = e.clientY; this.tap.move(e.pointerId, e.clientX, e.clientY); }
+      if (this.holdId === e.pointerId && Math.hypot(e.clientX - this.holdXY[0], e.clientY - this.holdXY[1]) > 22) this.cancelHold();
       if (this.down !== e.pointerId) return; e.preventDefault();
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
       for (const ev of (evs.length ? evs : [e])) {
@@ -216,6 +213,7 @@ export class IdeaBoard {
       }
     });
     const end = e => {
+      if (this.holdId === e.pointerId) this.cancelHold();
       if (e.pointerType === 'pen') pencil.pen();
       if (this.touches.has(e.pointerId)) {
         this.touches.delete(e.pointerId);
@@ -225,11 +223,11 @@ export class IdeaBoard {
       }
       if (this.down !== e.pointerId) return;
       const cancelled = e.type === 'pointercancel';
-      this.down = null; this.downType = null;
+      this.downTypeWas = this.downType; this.down = null; this.downType = null;
       if (this.tool === 'eraser') { if (this.erased) this.changed(); }
       else if (this.cur) {
         const s = this.cur; this.cur = null; this.pred = null;
-        if (!cancelled) { this.hist.push(this.strokes.slice()); this.strokes.push(s); this.redoStack = []; this.draw(); this.changed(); } else this.drawLive();
+        if (!cancelled) { this.hist.push(this.strokes.slice()); this.strokes.push(s); this.redoStack = []; this.lastStroke = this.downTypeWas === 'pen' ? s : null; this.lastStrokeAt = performance.now(); this.draw(); this.changed(); } else this.drawLive();
       }
     };
     c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
@@ -238,6 +236,24 @@ export class IdeaBoard {
     for (const t of ['selectstart', 'dragstart']) c.addEventListener(t, e => e.preventDefault());
   }
 
+  cancelHold() { clearTimeout(this.holdT); this.holdId = null; }
+  // a finger that stays down makes the line being drawn (or the one just finished, within 3 seconds) straight
+  armStraight(e) {
+    this.cancelHold();
+    if (!pencil.straight || this.tool !== 'pen' || (e.width || 0) > 70 || (e.height || 0) > 70) return;
+    const live = this.cur && this.down !== null && this.downType === 'pen', recent = !live && !this.cur && this.lastStroke && performance.now() - this.lastStrokeAt < 3000;
+    if (!live && !recent) return;
+    if (!live && this.touches.size > 0) return;
+    const id = e.pointerId; this.holdId = id; this.holdXY = [e.clientX, e.clientY];
+    this.holdT = setTimeout(() => {
+      if (this.holdId !== id) return; this.holdId = null;
+      if (live && this.cur && !this.straight) { const q = this.cur.p, n = q.length; this.cur.p = [q[0], q[1], q[n - 2], q[n - 1]]; this.straight = true; this.pred = null; this.queueLive(); }
+      else if (!live && this.lastStroke && this.strokes.includes(this.lastStroke)) {
+        const s = this.lastStroke, p = s.p; this.lastStroke = null; if (p.length < 6) return;
+        this.hist.push(this.strokes.slice()); this.strokes = this.strokes.map(x => x === s ? { c: s.c, p: [p[0], p[1], p[p.length - 2], p[p.length - 1]] } : x); this.redoStack = []; this.draw(); this.changed();
+      }
+    }, live ? 150 : 250);
+  }
   eraseAt(x, y) {
     const out = []; let changed = false;
     for (const s of this.strokes) { if (near(s, x, y)) { changed = true; out.push(...cutStroke(s, x, y)); } else out.push(s); }
