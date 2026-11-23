@@ -592,6 +592,8 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 .zoom-pct { min-width: 54px; height: 38px; border: 0; background: transparent; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 0 4px; font-variant-numeric: tabular-nums; }
 .zoom-pct:hover { background: #EBE7DB; color: var(--ink); }
 .sheet canvas { touch-action: none; }
+.sheet .overlay { z-index: 6; }
+.sheet .loading { z-index: 7; }
 
 /* class page for students + teacher class page */
 .entry.no-art { grid-template-columns: minmax(0, 1fr); }

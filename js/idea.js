@@ -175,7 +175,12 @@ export class IdeaBoard {
       }
       if (this.tool !== 'eraser') {
         const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];     // where the pencil is heading: drawn only on screen, never saved
-        this.pred = pe.length ? pe.slice(0, 2).flatMap(ev => this.pos(ev)) : null;
+        let lead = pe.length ? pe.slice(0, 2).flatMap(ev => this.pos(ev)) : null;
+        if (!lead && e.pointerType !== 'mouse' && this.cur && this.cur.p.length >= 6) {       // no predicted points (Safari): look a little ahead ourselves
+          const q = this.cur.p, n = q.length, vx = (q[n - 2] - q[n - 6]) / 2, vy = (q[n - 1] - q[n - 5]) / 2, sp = Math.hypot(vx, vy);
+          if (sp > 1) { const ext = Math.min(sp * 1.1, 30); lead = [Math.round(q[n - 2] + vx / sp * ext), Math.round(q[n - 1] + vy / sp * ext)]; }
+        }
+        this.pred = lead;
         this.queueLive();
       }
     });

@@ -16,7 +16,7 @@ export class Store {
     this.cursor = null; this.sync = 'saved'; this.online = true; this.listeners = {};
     this.cache = new Map(); this.flushing = false; this.retry = 0; this.closed = false; this.wasDown = false;
     this.outboxKey = `bem-outbox-${boardId}-${participantId || 'teacher'}`;
-    this.persistSoon = debounce(() => this.persist(), 80);
+    this.persistSoon = debounce(() => this.persist(), 500);   // (the local copy of unsaved work is written in the pauses, not after every stroke)
     this.timers = [];
     this.clockOffset = 0; this.scopeId = null; this.mode = 'live'; this.participantsMap = new Map(); this.me = null; this.curPage = null; this.liveCh = null;
   }
@@ -263,7 +263,7 @@ export class Store {
     o.data = data; o._b = null; this.invalidate(o.page_id); this.markDirty(id, 'full');
   }
   canEdit(o) {
-    if (this.role === 'teacher') return this.mode === 'live' || !!o.is_feedback;   // in a student's copy the teacher only edits their own feedback
+    if (this.role === 'teacher') return true;   // the teacher owns the room: she can erase, move or change anything, including what a student wrote or added (Undo brings it back)
     return !o.is_feedback && !!o.participant_id && o.participant_id === this.participantId;
   }
 

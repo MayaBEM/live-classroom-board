@@ -4,7 +4,7 @@ import { pencil, TwoFingerTap } from './pencil.js';
 import { pictureFromFile } from './picture.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER } from './render.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
 import { TimerController } from './timer.js';
@@ -103,14 +103,15 @@ export class BoardView {
     this.elTop = h('header', { class: 'b-top' + (this.review ? ' wide-wrap' : '') }, this.tbLeft, this.elRail, this.tbRight);
     this.elOpts = h('div', { class: 'b-pop', hidden: true });
     this.sheet = h('div', { class: 'sheet' });
-    this.cBase = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
+    this.cBase = h('canvas'); this.cUnder = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
+    [this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive].forEach((c, i) => { c.style.zIndex = String([0, 1, 3, 4, 5][i]); });   // paper, then pictures+highlighting, then the writing, then the stroke being written
     this.overlay = h('div', { class: 'overlay' });
     this.imgBox = h('div', { class: 'img-sel', hidden: true }, h('i', { class: 'img-handle' }));
     this.overlay.append(this.imgBox);
     this.fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
     this.fileInput.addEventListener('change', () => { const f = this.fileInput.files && this.fileInput.files[0]; this.fileInput.value = ''; if (f) this.addPicture(f); });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
-    this.sheet.append(this.cBase, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
+    this.sheet.append(this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
     this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
@@ -606,7 +607,7 @@ export class BoardView {
   sizeCanvases() {
     const pg = this.page; if (!pg) return;
     const W = Math.round(1000 * this.q), H = Math.round(pg.h * this.q);
-    for (const c of [this.cBase, this.cInk, this.cStroke, this.cLive]) { c.width = W; c.height = H; }
+    for (const c of [this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive]) { c.width = W; c.height = H; }
     this.strokeIdx = 1;
   }
 
@@ -656,14 +657,13 @@ export class BoardView {
 
   renderInk() {
     if (!this.pageId) return;
-    const ctx = this.cInk.getContext('2d'), q = this.q;
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, this.cInk.width, this.cInk.height);
-    ctx.setTransform(q, 0, 0, q, 0, 0);
-    const fp = this.focusPerson;
-    for (const o of this.store.pageObjects(this.pageId)) {
-      if (o.deleted || o.id === this.hiddenId) continue;
-      drawObject(ctx, o, fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
-    }
+    const ctx = this.cInk.getContext('2d'), uctx = this.cUnder.getContext('2d'), q = this.q;
+    for (const [c, x] of [[this.cInk, ctx], [this.cUnder, uctx]]) { x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.setTransform(q, 0, 0, q, 0, 0); }
+    const fp = this.focusPerson, list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && o.id !== this.hiddenId);
+    const opt = o => (fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
+    for (const o of list) if (o.type === 'image') drawObject(uctx, o, opt(o));             // pictures at the bottom,
+    for (const o of list) if (o.type === 'highlighter') drawObject(uctx, o, opt(o));       // then highlighting,
+    for (const o of list) if (!UNDER(o)) drawObject(ctx, o, opt(o));                        // and the writing on top
     this.positionImgBox();
   }
   scheduleInk() { if (this.inkQueued) return; this.inkQueued = true; requestAnimationFrame(() => { this.inkQueued = false; this.renderInk(); }); }
@@ -675,7 +675,7 @@ export class BoardView {
   strokeCtx() { if (!this._sctx) { try { this._sctx = this.cStroke.getContext('2d', { desynchronized: true }); } catch (e) { this._sctx = this.cStroke.getContext('2d'); } } return this._sctx; }
   clearStroke() {
     const sc = this.strokeCtx(); sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, this.cStroke.width, this.cStroke.height);
-    this.strokeIdx = 1; this.strokeDirty = false; this.pred = null; this.cStroke.style.opacity = '';
+    this.strokeIdx = 1; this.strokeDirty = false; this.pred = null; this.cStroke.style.opacity = ''; this.cStroke.style.zIndex = '4';
   }
 
   renderLive() {
@@ -694,6 +694,7 @@ export class BoardView {
         // the finished part goes onto the stroke canvas once; only the tip is redrawn each frame
         const sc = this.strokeCtx(); sc.setTransform(q, 0, 0, q, 0, 0);
         this.cStroke.style.opacity = this.cur.type === 'highlighter' ? '0.4' : '';
+        this.cStroke.style.zIndex = this.cur.type === 'highlighter' ? '2' : '4';      // highlighting stays under the pen even while it is being drawn
         this.strokeIdx = strokeInc(sc, this.cur, this.strokeIdx); this.strokeDirty = true;
         strokeTip(ctx, this.cur, this.pred);
       } else drawObject(ctx, this.cur);
@@ -898,7 +899,7 @@ export class BoardView {
         d.p.push(p.x, p.y); if (stride === 3) d.p.push(ev.pressure || 0.5);
       }
       const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];
-      this.pred = pe.length ? pe.slice(0, 3).map(ev => this.toPage(ev)) : null;
+      this.pred = pe.length ? pe.slice(0, 3).map(ev => this.toPage(ev)) : (e.pointerType === 'mouse' ? null : this.leadPoint(d, stride));   // Safari gives no predicted points: look a little ahead ourselves
       this.sendCurT(); this.requestLive();
     } else if (this.cur && SHAPES.has(t)) {
       const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;
@@ -969,6 +970,14 @@ export class BoardView {
     else { const w = Math.max(40, Math.min(1400, b.w + dx)); o.data = { ...b, w: Math.round(w), h: Math.round(w * b.h / b.w) }; }
     o._b = null; this.scheduleInk();
   }
+  // a short way ahead of the pencil, only drawn on screen while writing (never saved): hides the delay between hand and ink
+  leadPoint(d, stride) {
+    const p = d.p, n = p.length / stride; if (n < 3) return null;
+    const x1 = p[(n - 1) * stride], y1 = p[(n - 1) * stride + 1], vx = (x1 - p[(n - 3) * stride]) / 2, vy = (y1 - p[(n - 3) * stride + 1]) / 2, sp = Math.hypot(vx, vy);
+    if (sp < 0.4) return null;
+    const k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width, ext = Math.min(sp * 1.1, 9 * k);   // at most 9 screen pixels ahead
+    return [{ x: x1 + vx / sp * ext, y: y1 + vy / sp * ext }];
+  }
   cancelCurrent() { this.cur = null; this.downAt = null; this.eraseIds = null; this.clearStroke(); this.requestLive(); }
 
   finishCur() {
@@ -977,7 +986,7 @@ export class BoardView {
     const o = this.store.addObject(c.type, c.page_id, c.data, c.id);
     this.pushUndo({ t: 'create', id: o.id });
     if (this.pageId === c.page_id) {
-      const ctx = this.cInk.getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
+      const ctx = (UNDER(o) ? this.cUnder : this.cInk).getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
     }
     this.clearStroke();
     this.thumbDirty(c.page_id);

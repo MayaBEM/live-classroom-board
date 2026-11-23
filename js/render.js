@@ -202,8 +202,13 @@ export function drawObject(ctx, o, opts = {}) {
   ctx.restore();
 }
 
+// Pictures and highlighting sit UNDER the writing: pictures first, then highlighters, then everything else (pen, text, shapes, stamps)
+export const UNDER = o => o.type === 'image' || o.type === 'highlighter';
 export function drawObjects(ctx, objs, skipId) {
-  for (const o of objs) { if (!o.deleted && o.id !== skipId) drawObject(ctx, o); }
+  const list = objs.filter(o => !o.deleted && o.id !== skipId);
+  for (const o of list) if (o.type === 'image') drawObject(ctx, o);
+  for (const o of list) if (o.type === 'highlighter') drawObject(ctx, o);
+  for (const o of list) if (!UNDER(o)) drawObject(ctx, o);
 }
 
 // ---------------------------------------------------------------- bounds + hit testing
