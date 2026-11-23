@@ -888,3 +888,34 @@ input, textarea, select { font-size: max(16px, 1em); }
 .stk[aria-pressed="true"], .tapebtn[aria-pressed="true"] { border-color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); background: var(--teal-soft); }
 .b-pop .grp.tapes { flex-wrap: wrap; max-width: min(100%, 520px); gap: 6px; }
 .page-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+
+/* ---- teacher Home: students as friendly profiles */
+.home { padding: 6px 4px 30px; }
+.home-hello { padding: 14px 18px 4px; }
+.home-hello h1 { margin: 0; font-size: 28px; font-weight: 600; }
+.home-hello p { margin: 6px 0 0; color: var(--ink-2); font-size: 17px; }
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; padding: 16px 18px 8px; }
+.profile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 10px 14px; border: 2px solid var(--ink); background: var(--tile, var(--sun)); cursor: pointer; text-align: center; min-height: 176px; touch-action: manipulation; }
+.profile:hover { filter: brightness(.97); }
+.profile:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.profile canvas { display: block; }
+.pf-name { font-size: 20px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.pf-badges { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; }
+.pf-badge { padding: 1px 9px; background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.25); font-size: 13px; font-weight: 500; }
+.pf-badge.look { background: var(--orange); border-color: rgba(0,0,0,.4); font-weight: 600; }
+.profile .unread-dot { position: absolute; right: 8px; top: 8px; margin: 0; }
+.profile.add { background: #fff; border: 2px dashed var(--ink-2); justify-content: center; color: var(--ink-2); }
+.pf-plus { display: grid; place-items: center; width: 88px; height: 88px; border: 2px dashed var(--ink-2); border-radius: 50% !important; font-size: 44px; line-height: 1; }
+.home-classes { padding: 18px 18px 0; }
+.home-classes h2 { margin: 0 0 8px; font-size: 18px; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; min-height: 40px; border: 2px solid var(--ink); background: var(--tile, #fff); font-weight: 500; cursor: pointer; }
+.chip .n { background: rgba(255,255,255,.8); border: 1px solid rgba(0,0,0,.25); padding: 0 7px; font-size: 13px; }
+.chip.add { background: #fff; border-style: dashed; color: var(--ink-2); }
+.home-more { display: flex; flex-wrap: wrap; gap: 8px; padding: 20px 18px 0; }
+.home-tab { margin-bottom: 6px; font-weight: 600; }
+.avatar-btn { padding: 0; border: 0; background: none; cursor: pointer; display: inline-grid; flex: none; }
+.dash .sheet-panel > header { align-items: center; }
+.avatar-pick { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.avatar-opt { padding: 6px; border: 2px solid var(--hair, #E1DDD1); background: #fff; display: grid; place-items: center; cursor: pointer; }
+.avatar-opt[aria-pressed="true"] { border-color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); }

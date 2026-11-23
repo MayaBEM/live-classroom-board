@@ -11,8 +11,10 @@ import { boardStudentsDialog, checklist } from './members.js';
 import { importLibraryDialog } from './library.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
 import { IdeaBoard, STUDENT_INK, TEACHER_INK } from './idea.js';
+import { AVATARS, avatarCanvas } from './stickers.js';
 
 const TILE5 = ['c1', 'c2', 'c3', 'c4', 'c5'];
+const AVATAR_BG = ['#FFE3EC', '#E1F0FF', '#E4F6E1', '#FFF1C7', '#EDE3FF'];
 const cleanNames = text => [...new Set(String(text || '').split(/[,\n;]+/).map(s => s.trim().replace(/\s+/g, ' ').slice(0, 24)).filter(Boolean))];
 
 export const brand = (big = false) => h('a', { class: 'brand' + (big ? ' big stack' : ''), href: BASE, 'aria-label': 'Bright EngMath' },
@@ -42,7 +44,7 @@ export function artSvg() {
 export class TeacherApp {
   constructor(root) {
     this.root = root; this.sb = makeClient('teacher');
-    this.sel = 'all'; this.classes = []; this.boards = []; this.students = [];
+    this.sel = 'home'; this.classes = []; this.parts = []; this.boards = []; this.students = [];
     this.master = []; this.members = new Map(); this.apps = []; this.appLinks = new Map(); this.ideaMeta = new Map();   // appLinks: app id -> set of student ids   // master = the one list of students; members = board id -> set of student ids
     this.view = null;
   }
@@ -113,7 +115,7 @@ export class TeacherApp {
 
   // ----------------------------------------------------------------- dashboard
   async loadAll() {
-    const [c, b, s, ms, bm, ap, sa, im] = await Promise.all([
+    const [c, b, s, ms, bm, ap, sa, im, pt] = await Promise.all([
       this.sb.from('classes').select('*').order('name'),
       this.sb.from('boards').select('*, pages(count), classes(name)').order('created_at', { ascending: false }),
       this.sb.from('class_students').select('*').order('first_name'),
@@ -122,18 +124,19 @@ export class TeacherApp {
       this.sb.from('apps').select('*').order('created_at', { ascending: false }),
       this.sb.from('student_apps').select('app_id,student_id'),
       this.sb.from('idea_boards').select('student_id,n,updated_at,teacher_seen_at'),
+      this.sb.from('participants').select('board_id,name,submitted_at,checked_at,score,comment'),
     ]);
     const err = c.error || b.error || s.error || ms.error || bm.error || ap.error || sa.error || im.error;
     if (err) throw err;
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
-    this.apps = ap.data;
+    this.apps = ap.data; this.parts = pt.data || [];
     this.ideaMeta = new Map((im.data || []).map(r => [r.student_id, r]));
     this.appLinks = new Map();
     (sa.data || []).forEach(r => { if (!this.appLinks.has(r.app_id)) this.appLinks.set(r.app_id, new Set()); this.appLinks.get(r.app_id).add(r.student_id); });
     this.members = new Map();
     (bm.data || []).forEach(r => { if (!this.members.has(r.board_id)) this.members.set(r.board_id, new Set()); this.members.get(r.board_id).add(r.student_id); });
     if (this.sel.startsWith('stu:')) { if (!this.master.some(x => 'stu:' + x.id === this.sel)) this.sel = 'students'; }
-    else if (this.sel !== 'all' && this.sel !== 'students' && this.sel !== 'apps' && !this.classes.some(x => x.id === this.sel)) this.sel = 'all';
+    else if (this.sel !== 'home' && this.sel !== 'all' && this.sel !== 'students' && this.sel !== 'apps' && !this.classes.some(x => x.id === this.sel)) this.sel = 'home';
   }
 
   async showDashboard() {
@@ -153,6 +156,7 @@ export class TeacherApp {
       tabs.push(h('button', { class: 'tab c' + (ci % 5 + 1), 'aria-current': String(this.sel === c.id), onclick: () => { this.sel = c.id; this.renderDashboard(); } }, c.name, h('span', { class: 'n' }, n)));
     });
     const side = h('aside', { class: 'dash-side', 'aria-label': 'Classes' },
+      h('button', { class: 'tab stu home-tab', 'aria-current': String(this.sel === 'home'), onclick: () => { this.sel = 'home'; this.renderDashboard(); } }, 'Home'),
       h('h2', null, 'My students'),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
       this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'data-sid': m.id, 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
@@ -162,8 +166,8 @@ export class TeacherApp {
 
     const main = h('main', { class: 'dash-main' });
     const stu = this.sel.startsWith('stu:') ? this.master.find(x => 'stu:' + x.id === this.sel) : null;
-    if (this.sel === 'students' || this.sel === 'apps' || stu) {
-      if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'apps') main.append(this.appsPanel()); else main.append(this.studentsPanel());
+    if (this.sel === 'home' || this.sel === 'students' || this.sel === 'apps' || stu) {
+      if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'home') main.append(this.homePanel()); else if (this.sel === 'apps') main.append(this.appsPanel()); else main.append(this.studentsPanel());
       this.root.replaceChildren(h('div', { class: 'dash' },
         this.topBar(),
         h('div', { class: 'dash-body' }, side, main)));
@@ -313,6 +317,57 @@ export class TeacherApp {
   }
 
   // the one list of all my students
+  // ---- Home: every student as a friendly profile (a picture, a name, and what needs a look)
+  avatarKey(m) { const i = Math.max(0, this.master.findIndex(x => x.id === m.id)); return (m.avatar && AVATARS.includes(m.avatar)) ? m.avatar : AVATARS[i % AVATARS.length]; }
+  avatarEl(m, size = 84) { const i = Math.max(0, this.master.findIndex(x => x.id === m.id)); const c = avatarCanvas(this.avatarKey(m), size, AVATAR_BG[i % AVATAR_BG.length]); c.setAttribute('role', 'img'); c.setAttribute('aria-label', m.first_name + ' picture'); return c; }
+  // work of a student that was sent in and waits for the teacher
+  toCheckOf(m) {
+    const mine = new Set(this.boardsOfStudent(m).filter(b => b.mode === 'assignment').map(b => b.id)), name = m.first_name.toLowerCase();
+    return this.parts.filter(p => mine.has(p.board_id) && p.name.toLowerCase() === name && p.submitted_at && !p.checked_at && !p.score && !p.comment).map(p => this.boards.find(b => b.id === p.board_id)).filter(Boolean);
+  }
+  avatarDialog(m) {
+    const cur = this.avatarKey(m);
+    const grid = h('div', { class: 'avatar-pick' }, AVATARS.map((k, i) => h('button', { class: 'avatar-opt', 'aria-pressed': String(k === cur), 'aria-label': k, title: k, onclick: async () => {
+      const { error } = await this.sb.from('students').update({ avatar: k }).eq('id', m.id);
+      if (error) return toast(friendlyError(error), 'bad');
+      dlg.close(); m.avatar = k; await this.refresh(); } }, avatarCanvas(k, 72, AVATAR_BG[i % AVATAR_BG.length]))));
+    const dlg = modal({ title: `Picture for ${m.first_name}`, body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'Pick a picture. It shows on your home page so you can find them fast.'), grid), actions: [h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')] });
+  }
+  addStudentsDialog() {
+    const input = h('input', { class: 'input', id: 'ns', placeholder: 'First names, like: Mia, Ben, Nok', 'aria-label': 'First names' });
+    const go = async () => {
+      const names = cleanNames(input.value), have = new Set(this.master.map(s => s.first_name.toLowerCase())), fresh = names.filter(n => !have.has(n.toLowerCase()));
+      if (!names.length) return toast('Type first names, separated by commas.');
+      if (!fresh.length) return toast('Those students are already on your list.');
+      try { await this.ensureStudents(fresh); } catch (e) { return toast(friendlyError(e), 'bad'); }
+      dlg.close(); toast(`${fresh.length} student${fresh.length === 1 ? '' : 's'} added.`, 'ok'); await this.refresh();
+    };
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    const dlg = modal({ title: 'Add students', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'ns' }, 'First names'), input, h('span', { class: 'hint' }, 'Each student gets a 4-number code that never changes.'))), actions: [h('button', { class: 'btn', onclick: () => dlg.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: go }, 'Add')] });
+    setTimeout(() => input.focus(), 50);
+  }
+  homePanel() {
+    const teacher = CONFIG.TEACHER_NAME || '';
+    const tc = new Map(this.master.map(m => [m.id, this.toCheckOf(m)])), total = [...tc.values()].reduce((n, a) => n + a.length, 0);
+    const hour = new Date().getHours(), hello = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const needs = this.master.filter(m => tc.get(m.id).length || this.ideaUnread(m.id));
+    const card = (m, i) => {
+      const work = this.boardsOfStudent(m).length, chk = tc.get(m.id).length;
+      return h('button', { class: 'profile ' + TILE5[i % 5], 'data-sid': m.id, title: `Open ${m.first_name}'s page`, onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } },
+        this.avatarEl(m, 88), h('b', { class: 'pf-name' }, m.first_name),
+        h('span', { class: 'pf-badges' }, chk ? h('span', { class: 'pf-badge look' }, `${chk} to check`) : null, h('span', { class: 'pf-badge' }, work ? `${work} work` : 'no work yet')));
+    };
+    return h('section', { class: 'home' },
+      h('div', { class: 'home-hello' }, h('h1', null, `${hello}${teacher ? ', Teacher ' + teacher : ''}!`),
+        h('p', null, !this.master.length ? 'Add your students and they show up here as pictures.' : total ? `${total} piece${total === 1 ? '' : 's'} of work ${total === 1 ? 'is' : 'are'} waiting for you to check.` : needs.length ? 'Someone left you a note.' : 'Everyone is up to date.')),
+      this.master.length ? h('div', { class: 'profile-grid' }, this.master.map(card),
+        h('button', { class: 'profile add', onclick: () => this.addStudentsDialog(), 'aria-label': 'Add students' }, h('span', { class: 'pf-plus', 'aria-hidden': 'true' }, '+'), h('b', { class: 'pf-name' }, 'Add student')))
+        : h('div', { class: 'profile-grid' }, h('button', { class: 'profile add', onclick: () => this.addStudentsDialog() }, h('span', { class: 'pf-plus', 'aria-hidden': 'true' }, '+'), h('b', { class: 'pf-name' }, 'Add my first students'))),
+      this.classes.length ? h('div', { class: 'home-classes' }, h('h2', null, 'My classes'), h('div', { class: 'chip-row' }, this.classes.map((c, ci) => h('button', { class: 'chip c' + (ci % 5 + 1), onclick: () => { this.sel = c.id; this.renderDashboard(); } }, c.name, h('span', { class: 'n' }, this.students.filter(s => s.class_id === c.id).length))),
+        h('button', { class: 'chip add', onclick: () => this.newClassDialog() }, '+ New class'))) : null,
+      h('div', { class: 'home-more' }, h('button', { class: 'btn', onclick: () => { this.sel = 'all'; this.renderDashboard(); } }, 'See all boards'), h('button', { class: 'btn', onclick: () => { this.sel = 'apps'; this.renderDashboard(); } }, 'App shelf')));
+  }
+
   studentsPanel() {
     const input = h('input', { class: 'input', placeholder: 'First names, like: Mia, Ben, Nok', 'aria-label': 'Add student first names' });
     const add = async () => {
@@ -381,7 +436,7 @@ export class TeacherApp {
     const slots = new Map();
     const row = b => { const slot = h('div', { class: 'who-line' }); slots.set(b.id, slot); return this.boardRow(b, b.mode === 'assignment' ? slot : null); };
     const top = h('section', { class: 'sheet-panel' },
-      h('header', null, h('h2', null, `${m.first_name}'s page`),
+      h('header', null, h('button', { class: 'avatar-btn', title: 'Change picture', 'aria-label': `Change ${m.first_name}'s picture`, onclick: () => this.avatarDialog(m) }, this.avatarEl(m, 52)), h('h2', null, `${m.first_name}'s page`),
         h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, h('button', { class: 'btn sm', onclick: () => this.editCode(m) }, `Code ${m.code}`))),
       h('div', { class: 'class-link' },
         h('p', null, 'Send this link ', h('b', null, 'once'), `. ${m.first_name} types the code and sees all their own work. New work you add here appears there by itself and moves, so it is easy to notice.`),
