@@ -79,7 +79,7 @@ export class BoardView {
       st.on('instr', p => { if (!this.isTeacher) this.instr.setRemote(p); }),
       st.on('denied', () => toast(st.board && st.board.locked ? 'Writing is locked by your teacher.' : 'That change was not saved.', 'bad')),
       st.on('removed', () => this.showRemoved()),
-      pencil.subscribe(() => this.renderRail()),
+      pencil.subscribe(() => { this.renderRail(); this.renderOpts(); }),
       onImagesReady(() => this.scheduleInk()),
     ];
     this.ro = new ResizeObserver(() => this.onResize());
@@ -423,6 +423,7 @@ export class BoardView {
         mine.map(hex => h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
         h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+'))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
+      if (t === 'pen' || t === 'highlighter') kids.push(h('span', { class: 'sep' }), h('button', { class: 'btn sm' + (pencil.straight ? ' on' : ''), 'aria-pressed': String(pencil.straight), title: 'While you draw with the pencil, rest one finger of your other hand on the screen to make the line straight', onclick: () => pencil.toggleStraight() }, 'Finger = straight line'));
     } else if (t === 'eraser') {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser type' }, [['part', 'Rub out a part'], ['whole', 'Remove a whole line']].map(([k, label]) =>
         h('button', { class: 'btn sm' + (this.eraseMode === k ? ' on' : ''), 'aria-pressed': String(this.eraseMode === k), onclick: () => { this.eraseMode = k; try { localStorage.setItem('bem-erase-mode', k); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
@@ -868,7 +869,7 @@ export class BoardView {
       for (const [id, p] of [...this.pointers]) if (p.type === 'touch') this.pointers.delete(id);
       if (this.g || this.pan || this.cur) { this.g = null; this.pan = null; this.stage.classList.remove('panning'); this.cancelCurrent(); this.suppress = false; }
       this.tap.reset();
-    } else if (e.pointerType === 'touch' && this.penActive()) return;     // a resting hand while the pencil writes: ignored completely
+    } else if (e.pointerType === 'touch' && this.penActive()) { this.holdStraight(e); return; }     // a resting hand while the pencil writes is ignored; one finger put down on purpose makes the line straight
     try { this.stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     if (this.editor) { const wasText = this.tool === 'text'; this.commitEditor(); if (wasText) this.skipTextOpen = true; }
@@ -883,7 +884,7 @@ export class BoardView {
     if (t === 'pen' || t === 'highlighter') {
       const pr = e.pointerType === 'pen' && t === 'pen';
       const data = { c: t === 'pen' ? this.color : this.hlColor, s: (t === 'pen' ? PEN_SIZES : HL_SIZES)[this.sizeIdx], pr: pr ? 1 : 0, p: pr ? [p.x, p.y, e.pressure || 0.5] : [p.x, p.y] };
-      this.clearStroke(); this.cur = { id: uuid(), type: t, page_id: this.pageId, data, deleted: false }; this.sentTo = 0;
+      this.clearStroke(); this.cur = { id: uuid(), type: t, page_id: this.pageId, data, deleted: false }; this.sentTo = 0; this.straight = false; this.strokeStartedAt = performance.now();
       this.sendCur(); this.requestLive();
     } else if (SHAPES.has(t)) {
       this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
@@ -916,7 +917,12 @@ export class BoardView {
     if (!this.downAt) return;
     if (Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 5) this.downAt.moved = true;
     const t = this.tool;
-    if (this.cur && (t === 'pen' || t === 'highlighter')) {
+    if (this.cur && (t === 'pen' || t === 'highlighter') && this.straight) {
+      // a finger is resting: the line goes straight from where it started to where the pencil is now
+      const d = this.cur.data, stride = d.pr ? 3 : 2, p = this.toPage(e);
+      d.p[stride] = p.x; d.p[stride + 1] = p.y; if (stride === 3) d.p[5] = e.pressure || 0.5;
+      this.pred = null; this.requestLive();
+    } else if (this.cur && (t === 'pen' || t === 'highlighter')) {
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e], d = this.cur.data, stride = d.pr ? 3 : 2;
       for (const ev of (evs.length ? evs : [e])) {
         const p = this.toPage(ev), n = d.p.length;
@@ -1003,6 +1009,16 @@ export class BoardView {
     if (sp < 0.4) return null;
     const k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width, ext = Math.min(sp * 1.2, 12 * k);   // at most 12 screen pixels ahead
     return [{ x: x1 + vx / sp * ext, y: y1 + vy / sp * ext }];
+  }
+  // one finger of the other hand put down while the pencil is drawing: the line becomes straight (start of the line to the pencil)
+  holdStraight(e) {
+    if (!pencil.straight || this.straight || !this.cur || !(this.cur.type === 'pen' || this.cur.type === 'highlighter')) return;
+    if (![...this.pointers.values()].some(p => p.type === 'pen')) return;
+    if ((e.width || 0) > 30 || (e.height || 0) > 30) return;                 // a whole hand, not one finger
+    if (performance.now() - (this.strokeStartedAt || 0) < 150) return;       // a hand that landed together with the pencil
+    const d = this.cur.data, st = d.pr ? 3 : 2, n = d.p.length / st;
+    d.p = [...d.p.slice(0, st), ...d.p.slice((n - 1) * st, n * st)];
+    this.straight = true; this.clearStroke(); this.sentTo = 0; this.requestLive();
   }
   cancelCurrent() { this.cur = null; this.downAt = null; this.finishErase(); this.clearStroke(); this.requestLive(); }
 

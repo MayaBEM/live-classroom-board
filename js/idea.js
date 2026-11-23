@@ -172,7 +172,12 @@ export class IdeaBoard {
         if (this.down !== null && this.downType === 'touch') stopStroke();       // the hand landed first: the pencil wins
         this.touches.clear(); this.tap.reset();
       } else if (e.pointerType === 'touch') {
-        if (pencil.recent() || (this.down !== null && this.downType === 'pen')) return;   // a resting hand
+        if (pencil.recent() || (this.down !== null && this.downType === 'pen')) {          // a resting hand ... unless it is one finger put down on purpose while the pencil draws: the line goes straight
+          if (pencil.straight && this.cur && this.down !== null && this.downType === 'pen' && !this.straight && !((e.width || 0) > 30 || (e.height || 0) > 30) && performance.now() - this.downAt > 150) {
+            const q = this.cur.p, n = q.length; this.cur.p = [q[0], q[1], q[n - 2], q[n - 1]]; this.straight = true; this.pred = null; this.queueLive();
+          }
+          return;
+        }
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (this.touches.size >= 2) {                                              // two fingers: not writing
           if (this.down !== null && this.downType === 'touch') stopStroke();
@@ -186,7 +191,7 @@ export class IdeaBoard {
       try { c.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
       const [x, y] = this.pos(e);
       if (this.tool === 'eraser') { this.erased = false; this.erasedSnap = false; this.eraseAt(x, y); }
-      else { this.cur = { c: this.colour, p: [x, y] }; this.drawLive(); }
+      else { this.cur = { c: this.colour, p: [x, y] }; this.straight = false; this.drawLive(); }
     });
     c.addEventListener('pointermove', e => {
       if (e.pointerType === 'pen') pencil.pen();
@@ -196,6 +201,7 @@ export class IdeaBoard {
       for (const ev of (evs.length ? evs : [e])) {
         const [x, y] = this.pos(ev);
         if (this.tool === 'eraser') this.eraseAt(x, y);
+        else if (this.cur && this.straight) { this.cur.p = [this.cur.p[0], this.cur.p[1], x, y]; }
         else if (this.cur) { const p = this.cur.p, dx = x - p[p.length - 2], dy = y - p[p.length - 1]; if (dx * dx + dy * dy >= MIN_STEP * MIN_STEP && p.length < MAX_POINTS) p.push(x, y); }
       }
       if (this.tool !== 'eraser') {

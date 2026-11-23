@@ -8,8 +8,9 @@ const KEY = 'bem-pencil';
 let mode = 'auto';      // 'auto' | 'only' | 'any'
 let seen = false;       // a pen has been used on this device
 let lastPen = -1e9;     // when the pen last touched the screen (ms)
+let straightOn = true;  // while the pencil draws, one finger of the other hand resting on the screen makes the line straight
 const listeners = new Set();
-try { const m = localStorage.getItem(KEY + '-mode'); if (m === 'only' || m === 'any') mode = m; seen = localStorage.getItem(KEY + '-seen') === '1'; } catch (e) { /* private window: it just starts fresh each time */ }
+try { const m = localStorage.getItem(KEY + '-mode'); if (m === 'only' || m === 'any') mode = m; seen = localStorage.getItem(KEY + '-seen') === '1'; straightOn = localStorage.getItem('bem-straight') !== '0'; } catch (e) { /* private window: it just starts fresh each time */ }
 const save = () => { try { localStorage.setItem(KEY + '-mode', mode); localStorage.setItem(KEY + '-seen', seen ? '1' : '0'); } catch (e) { /* fine */ } };
 const tell = () => listeners.forEach(f => { try { f(); } catch (e) { /* fine */ } });
 
@@ -24,6 +25,8 @@ export const pencil = {
   // within ms of the pen touching, a finger is a resting hand
   recent(ms = 900) { return performance.now() - lastPen < ms; },
   toggle() { mode = this.only ? 'any' : 'only'; save(); tell(); return this.only; },
+  get straight() { return straightOn; },
+  toggleStraight() { straightOn = !straightOn; try { localStorage.setItem('bem-straight', straightOn ? '1' : '0'); } catch (e) { /* fine */ } tell(); return straightOn; },
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 };
 
