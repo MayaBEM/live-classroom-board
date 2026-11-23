@@ -22,6 +22,13 @@ const TOOLS = [
 ];
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const SHAPES = new Set(['line', 'arrow', 'rect', 'ellipse']);
+const ERASER_PX = [8, 14, 26];   // eraser radius on the screen (thin, medium, thick)
+// distance from a point to a straight piece a-b
+function distPtSeg(px, py, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / l2)) : 0;
+  return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+}
 // colours a person chose with the colour picker, kept on this device
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem('bem-custom-colors') || '[]'); return Array.isArray(a) ? a.filter(isHex).slice(0, 8) : []; } catch (e) { return []; } };
 const saveRecent = a => { try { localStorage.setItem('bem-custom-colors', JSON.stringify(a)); } catch (e) { /* fine */ } };
@@ -43,7 +50,8 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent(); this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent();
+    this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -392,7 +400,7 @@ export class BoardView {
   renderOpts() {
     const o = this.elOpts, t = this.tool, kids = [];
     const colored = t === 'pen' || t === 'highlighter' || t === 'text' || SHAPES.has(t);
-    const sizes = onPick => [0, 1, 2].map(i => h('button', { class: 'sz', 'aria-label': ['Thin', 'Medium', 'Thick'][i], title: ['Thin', 'Medium', 'Thick'][i], 'aria-pressed': String(this.sizeIdx === i), onclick: () => onPick(i) }, h('i', { style: { height: [2, 4, 8][i] + 'px' } })));
+    const sizes = (onPick, cur = this.sizeIdx) => [0, 1, 2].map(i => h('button', { class: 'sz', 'aria-label': ['Thin', 'Medium', 'Thick'][i], title: ['Thin', 'Medium', 'Thick'][i], 'aria-pressed': String(cur === i), onclick: () => onPick(i) }, h('i', { style: { height: [2, 4, 8][i] + 'px' } })));
     if (t === 'stamp') {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Stamp' }, STAMPS.map(([k, name]) =>
         h('button', { class: 'stampbtn', 'aria-label': name, title: name, 'aria-pressed': String(this.stampKind === k), onclick: () => { this.stampKind = k; this.renderOpts(); } }, this.stampPreview(k)))));
@@ -415,6 +423,10 @@ export class BoardView {
         mine.map(hex => h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
         h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+'))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
+    } else if (t === 'eraser') {
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser type' }, [['part', 'Rub out a part'], ['whole', 'Remove a whole line']].map(([k, label]) =>
+        h('button', { class: 'btn sm' + (this.eraseMode === k ? ' on' : ''), 'aria-pressed': String(this.eraseMode === k), onclick: () => { this.eraseMode = k; try { localStorage.setItem('bem-erase-mode', k); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
+      kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser size' }, sizes(i => { this.eraseSizeIdx = i; this.renderOpts(); }, this.eraseSizeIdx)));
     } else if (t === 'image') {
       kids.push(h('button', { class: 'btn primary sm', onclick: () => this.pickPicture() }, iconEl('image', 18), 'Add a picture'),
         h('span', { class: 'note' }, 'Drag a picture to move it. Drag its corner to make it bigger or smaller. The eraser removes it.'));
@@ -668,6 +680,14 @@ export class BoardView {
   }
   scheduleInk() { if (this.inkQueued) return; this.inkQueued = true; requestAnimationFrame(() => { this.inkQueued = false; this.renderInk(); }); }
 
+  tipBox(cur, pred) {
+    const d = cur.data, st = d.pr ? 3 : 2, p = d.p, n = p.length / st, q = this.q, c = this.cLive; if (!n) return null;
+    const xs = [p[(n - 1) * st]], ys = [p[(n - 1) * st + 1]];
+    if (n >= 2) { xs.push(p[(n - 2) * st]); ys.push(p[(n - 2) * st + 1]); }
+    if (pred) for (const t of pred) { xs.push(t.x); ys.push(t.y); }
+    const pad = d.s * 1.6 + 4, x0 = Math.max(0, Math.floor((Math.min(...xs) - pad) * q)), y0 = Math.max(0, Math.floor((Math.min(...ys) - pad) * q));
+    return { x: x0, y: y0, w: Math.max(1, Math.min(c.width, Math.ceil((Math.max(...xs) + pad) * q)) - x0), h: Math.max(1, Math.min(c.height, Math.ceil((Math.max(...ys) + pad) * q)) - y0) };
+  }
   requestLive() { if (this.liveQueued) return; this.liveQueued = true; requestAnimationFrame(() => { this.liveQueued = false; this.renderLive(); }); }
 
   // low-latency 2D contexts (where the browser supports it) for the stroke that is being drawn right now
@@ -680,7 +700,11 @@ export class BoardView {
 
   renderLive() {
     const c = this.cLive, ctx = this.liveCtx(), q = this.q, now = performance.now();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
+    // while one line is being written and nothing else is moving, only the small patch around the tip is cleared and redrawn (a big canvas is slow to clear every frame)
+    const simple = !!this.cur && (this.cur.type === 'pen' || this.cur.type === 'highlighter') && !this.ghosts.size && !this.laserPts.length;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (simple && this._tipBox) ctx.clearRect(this._tipBox.x, this._tipBox.y, this._tipBox.w, this._tipBox.h); else ctx.clearRect(0, 0, c.width, c.height);
+    this._tipBox = null;
     if (!this.pageId) return;
     ctx.setTransform(q, 0, 0, q, 0, 0);
     let again = false;
@@ -697,6 +721,7 @@ export class BoardView {
         this.cStroke.style.zIndex = this.cur.type === 'highlighter' ? '2' : '4';      // highlighting stays under the pen even while it is being drawn
         this.strokeIdx = strokeInc(sc, this.cur, this.strokeIdx); this.strokeDirty = true;
         strokeTip(ctx, this.cur, this.pred);
+        if (simple) this._tipBox = this.tipBox(this.cur, this.pred);
       } else drawObject(ctx, this.cur);
     } else if (this.strokeDirty) this.clearStroke();
     // laser
@@ -871,7 +896,7 @@ export class BoardView {
       if (target) { this.selectImg(target.id); this.imgDrag = { id: target.id, mode, p0: p, before: target.data, moved: false }; }
       else { this.selectImg(null); this.downAt = null; this.startPan(e); }
     } else if (t === 'eraser') {
-      this.eraseIds = []; this.eraseAt(p);
+      this.eraseIds = []; this.eraseAdd = []; this.eraseLast = p; this.eraseSeg(p, p); this.renderInk();
     } else if (t === 'laser') {
       this.laserMove(p);
     }
@@ -905,7 +930,7 @@ export class BoardView {
       const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;
       if (e.shiftKey && (t === 'rect' || t === 'ellipse')) { const m = Math.max(Math.abs(p.x - d.x0), Math.abs(p.y - d.y0)); d.x1 = d.x0 + Math.sign(p.x - d.x0 || 1) * m; d.y1 = d.y0 + Math.sign(p.y - d.y0 || 1) * m; }
       this.sendShapeT(); this.requestLive();
-    } else if (t === 'eraser') this.eraseAt(this.toPage(e));
+    } else if (t === 'eraser') this.eraseMove(e);
     else if (t === 'laser') this.laserMove(this.toPage(e));
   }
 
@@ -915,7 +940,9 @@ export class BoardView {
     try { this.stage.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     if (!had) return;
     if (this.g) {
-      if (this.tap.up(e.pointerId) && !cancelled) this.doUndo();      // two fingers tapped together
+      const tapN = this.tap.up(e.pointerId);
+      if (tapN === 2 && !cancelled) this.doUndo();           // two fingers tapped together: undo
+      else if (tapN === 3 && !cancelled) this.doRedo();      // three fingers tapped together: redo (bring it back)
       else if (!cancelled && !this.g.swiped && this.pointers.size === 1) {                // two fingers swept sideways: turn the page
         const rem = [...this.pointers.values()][0], g = this.g, cx = (e.clientX + rem.x) / 2, cy = (e.clientY + rem.y) / 2;
         const dx = cx - g.sx, dy = cy - g.sy, d = Math.hypot(e.clientX - rem.x, e.clientY - rem.y), ok = d / g.d > 0.8 && d / g.d < 1.25;
@@ -952,8 +979,7 @@ export class BoardView {
       if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 3) { this.cur = null; this.requestLive(); }
       else { for (const k of ['x0', 'y0', 'x1', 'y1']) d[k] = Math.round(d[k] * 10) / 10; this.finishCur(); }
     } else if (t === 'eraser') {
-      if (this.eraseIds && this.eraseIds.length) this.pushUndo({ t: 'delete', ids: this.eraseIds });
-      this.eraseIds = null;
+      this.finishErase();
     } else if (t === 'text' && da && !da.moved) {
       if (this.skipTextOpen) { this.skipTextOpen = false; return; }
       this.openTextAt(da.p);
@@ -975,10 +1001,10 @@ export class BoardView {
     const p = d.p, n = p.length / stride; if (n < 3) return null;
     const x1 = p[(n - 1) * stride], y1 = p[(n - 1) * stride + 1], vx = (x1 - p[(n - 3) * stride]) / 2, vy = (y1 - p[(n - 3) * stride + 1]) / 2, sp = Math.hypot(vx, vy);
     if (sp < 0.4) return null;
-    const k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width, ext = Math.min(sp * 1.1, 9 * k);   // at most 9 screen pixels ahead
+    const k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width, ext = Math.min(sp * 1.2, 12 * k);   // at most 12 screen pixels ahead
     return [{ x: x1 + vx / sp * ext, y: y1 + vy / sp * ext }];
   }
-  cancelCurrent() { this.cur = null; this.downAt = null; this.eraseIds = null; this.clearStroke(); this.requestLive(); }
+  cancelCurrent() { this.cur = null; this.downAt = null; this.finishErase(); this.clearStroke(); this.requestLive(); }
 
   finishCur() {
     const c = this.cur; this.cur = null;
@@ -1014,19 +1040,69 @@ export class BoardView {
     this._sl(p);
   }
 
-  eraseAt(p) {
-    const r = Math.max(5, 11 / this.view.s), hits = [];
-    const list = this.store.pageObjects(this.pageId);
+  // ---- eraser: it can rub out just a piece of a line (the rest stays), or take away a whole line
+  eraseR() { return Math.max(1, ERASER_PX[this.eraseSizeIdx] / (this.view.s || 1)); }
+  eraseMove(e) {
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) { const p = this.toPage(ev); this.eraseSeg(this.eraseLast || p, p); this.eraseLast = p; }
+    this.scheduleInk();
+  }
+  eraseSeg(a, b) {
+    const r = this.eraseR(), list = this.store.pageObjects(this.pageId), part = this.eraseMode === 'part';
+    const x0 = Math.min(a.x, b.x) - r, x1 = Math.max(a.x, b.x) + r, y0 = Math.min(a.y, b.y) - r, y1 = Math.max(a.y, b.y) + r;
+    let changed = false;
     for (let i = list.length - 1; i >= 0; i--) {
       const o = list[i];
       if (o.deleted || !this.store.canEdit(o)) continue;
-      if (hit(o, p.x, p.y, r)) hits.push(o.id);
+      const bb = bounds(o); if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) continue;
+      if (part && (o.type === 'pen' || o.type === 'highlighter')) { if (this.cutStroke(o, a, b, r)) changed = true; continue; }
+      // whole objects: touched anywhere along the way from the last point to this one
+      const len = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.max(1, Math.ceil(len / Math.max(1, r * 0.8)));
+      let touched = false;
+      for (let k = 0; k <= steps && !touched; k++) touched = hit(o, a.x + (b.x - a.x) * k / steps, a.y + (b.y - a.y) * k / steps, r);
+      if (touched) { this.store.setDeleted([o.id], true); if (this.eraseIds) this.eraseIds.push(o.id); changed = true; }
     }
-    if (hits.length) {
-      this.store.setDeleted(hits, true);
-      if (this.eraseIds) this.eraseIds.push(...hits);
-      this.renderInk(); this.thumbDirty(this.pageId);
+    if (changed) this.thumbDirty(this.pageId);
+    return changed;
+  }
+  // rub out the part of a pen or highlighter line that the eraser passed over; the pieces left over become lines of their own
+  cutStroke(o, a, b, r) {
+    const d = o.data, st = d.pr ? 3 : 2, p = d.p, n = p.length / st, rr = r + d.s / 2;
+    // does the eraser come near this line at all? (checked on the points as they are)
+    let near = false;
+    for (let i = 0; i < n && !near; i++) near = distPtSeg(p[i * st], p[i * st + 1], a, b) <= rr || (i > 0 && distPtSeg(a.x, a.y, { x: p[(i - 1) * st], y: p[(i - 1) * st + 1] }, { x: p[i * st], y: p[i * st + 1] }) <= rr);
+    if (!near) return false;
+    // fast writing leaves long gaps between points: fill them in so the cut is exact
+    const gap = Math.max(0.8, rr * 0.5), dense = [];
+    for (let i = 0; i < n; i++) {
+      const x = p[i * st], y = p[i * st + 1], pr = st === 3 ? p[i * 3 + 2] : 0;
+      if (i > 0 && dense.length < 6000) {
+        const q = dense[dense.length - 1], L = Math.hypot(x - q[0], y - q[1]), k = Math.min(60, Math.floor(L / gap));
+        for (let j = 1; j <= k; j++) dense.push([q[0] + (x - q[0]) * j / (k + 1), q[1] + (y - q[1]) * j / (k + 1), q[2] + (pr - q[2]) * j / (k + 1)]);
+      }
+      dense.push([x, y, pr]);
     }
+    const keep = dense.map(q => distPtSeg(q[0], q[1], a, b) > rr);
+    if (keep.every(Boolean)) return false;
+    const runs = []; let cur = [];
+    for (let i = 0; i < dense.length; i++) { if (keep[i]) cur.push(dense[i]); else { if (cur.length) runs.push(cur); cur = []; } }
+    if (cur.length) runs.push(cur);
+    this.store.setDeleted([o.id], true); if (this.eraseIds) this.eraseIds.push(o.id);
+    for (const run of runs) {
+      if (run.length < 2) continue;
+      const flat = []; for (const q of run) { flat.push(q[0], q[1]); if (st === 3) flat.push(q[2]); }
+      const piece = this.store.addLike(o, { ...d, p: simplify(flat, st, 0.3).map(v => Math.round(v * 20) / 20) });
+      if (this.eraseAdd) this.eraseAdd.push(piece.id);
+    }
+    return true;
+  }
+  // the end of one rub: one Undo brings back everything that rub took away
+  finishErase() {
+    const del = this.eraseIds, add = this.eraseAdd; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null;
+    if (!del) return;
+    const made = new Set(add || []);
+    const a = { t: 'erase', del: del.filter(id => !made.has(id)), add: (add || []).filter(id => { const o = this.store.objs.get(id); return o && !o.deleted; }) };
+    if (a.del.length || a.add.length) this.pushUndo(a);
   }
 
   // ---- gestures
@@ -1132,6 +1208,7 @@ export class BoardView {
     let pages = [];
     if (a.t === 'create') pages = this.store.setDeleted([a.id], inverse);
     else if (a.t === 'delete') pages = this.store.setDeleted(a.ids, !inverse);
+    else if (a.t === 'erase') pages = [...this.store.setDeleted(a.add, inverse), ...this.store.setDeleted(a.del, !inverse)];   // part of a stroke erased: undo removes the pieces and brings the whole stroke back
     else if (a.t === 'edit') { this.store.updateData(a.id, inverse ? a.before : a.after); const o = this.store.objs.get(a.id); if (o) pages = [o.page_id]; }
     this.renderInk(); for (const p of pages) this.thumbDirty(p);
   }

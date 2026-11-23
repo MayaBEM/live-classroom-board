@@ -247,6 +247,13 @@ export class Store {
     this.objs.set(id, o); this.invalidate(pageId); this.markDirty(id, 'full');
     return o;
   }
+  // a new object that takes the place of a piece of an old one (erasing part of a stroke): same writer, same copy, same time
+  addLike(o, data) {
+    const id = uuid();
+    const n = norm({ id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, author: o.author, type: o.type, data, deleted: false, created_at: o.created_at });
+    this.objs.set(id, n); this.invalidate(o.page_id); this.markDirty(id, 'full');
+    return n;
+  }
   setDeleted(ids, val) {
     const pages = new Set();
     for (const id of ids) {

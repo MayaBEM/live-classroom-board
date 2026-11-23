@@ -27,16 +27,20 @@ export const pencil = {
   subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 };
 
-// a two-finger tap (both fingers down together, lifted quickly, hardly moving) means "undo"
+// A quick tap with several fingers at once (down together, lifted quickly, hardly moving):
+//  two fingers = undo, three fingers = redo.  up() tells how many fingers the tap had (2 or 3), or 0 when it was not a tap.
 export class TwoFingerTap {
   constructor() { this.s = null; }
   reset() { this.s = null; }
   down(pts) {   // pts: Map of pointer id -> {x, y}, after the new finger was added
-    this.s = pts.size === 2 ? { t: performance.now(), start: new Map([...pts].map(([k, v]) => [k, { x: v.x, y: v.y }])), moved: false, done: false } : null;
+    const now = performance.now(), copy = () => new Map([...pts].map(([k, v]) => [k, { x: v.x, y: v.y }]));
+    if (pts.size === 2) this.s = { t: now, n: 2, start: copy(), moved: false, done: false };
+    else if (pts.size === 3 && this.s && this.s.n === 2 && !this.s.done && !this.s.moved && now - this.s.t < 160) this.s = { t: this.s.t, n: 3, start: copy(), moved: false, done: false };   // the third finger came right after the second
+    else this.s = null;
   }
   move(id, x, y) { const s = this.s, p = s && s.start.get(id); if (p && Math.hypot(x - p.x, y - p.y) > 14) s.moved = true; }
-  up(id) {      // true when this lift completes a tap
-    const s = this.s; if (!s || !s.start.has(id)) return false;
-    const ok = !s.moved && !s.done && performance.now() - s.t < 350; s.done = true; return ok;
+  up(id) {
+    const s = this.s; if (!s || !s.start.has(id)) return 0;
+    const ok = !s.moved && !s.done && performance.now() - s.t < 350; s.done = true; return ok ? s.n : 0;
   }
 }

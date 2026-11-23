@@ -38,9 +38,34 @@ function drawStrokes(ctx, strokes, inks, W, H, widthPx, tip) {
   }
 }
 
+// the eraser rubs out only the part of a line it passes over: the pieces left over stay as lines of their own
+const ERASE_PART = 22;   // how close the eraser must be to rub a point out (out of 1000)
+function cutStroke(s, x, y) {
+  const p = s.p || [], n = p.length / 2;
+  if (n < 2) { return Math.hypot(p[0] - x, p[1] - y) < ERASE_PART ? [] : [s]; }
+  // fast writing leaves long gaps between points: fill them in so the cut is exact
+  const dense = [];
+  for (let i = 0; i < n; i++) {
+    const px = p[i * 2], py = p[i * 2 + 1];
+    if (i > 0) { const qx = dense[dense.length - 2], qy = dense[dense.length - 1], L = Math.hypot(px - qx, py - qy), k = Math.min(80, Math.floor(L / 8)); for (let j = 1; j <= k; j++) dense.push(qx + (px - qx) * j / (k + 1), qy + (py - qy) * j / (k + 1)); }
+    dense.push(px, py);
+  }
+  const out = []; let cur = [], cutAny = false;
+  for (let i = 0; i < dense.length; i += 2) {
+    if (Math.hypot(dense[i] - x, dense[i + 1] - y) < ERASE_PART) { cutAny = true; if (cur.length >= 4) out.push({ c: s.c, p: cur }); cur = []; }
+    else cur.push(Math.round(dense[i]), Math.round(dense[i + 1]));
+  }
+  if (!cutAny) return [s];
+  if (cur.length >= 4) out.push({ c: s.c, p: cur });
+  return out;
+}
 const near = (s, x, y) => {
   const p = s.p; if (!p) return false;
-  for (let i = 0; i < p.length; i += 2) { const dx = p[i] - x, dy = p[i + 1] - y; if (dx * dx + dy * dy < ERASE_R * ERASE_R) return true; }
+  for (let i = 0; i < p.length; i += 2) {
+    const ax = p[i], ay = p[i + 1], bx = i + 2 < p.length ? p[i + 2] : ax, by = i + 2 < p.length ? p[i + 3] : ay, dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2)) : 0, qx = ax + t * dx - x, qy = ay + t * dy - y;
+    if (qx * qx + qy * qy < ERASE_PART * ERASE_PART) return true;
+  }
   return false;
 };
 
@@ -50,7 +75,7 @@ export class IdeaBoard {
     Object.assign(this, { strokes: [], other: [], ink: STUDENT_INK, otherInk: TEACHER_INK, readonly: false, onChange: null, label: '', compact: false }, opts);
     this.strokes = (this.strokes || []).slice(); this.other = (this.other || []).slice();
     this.tool = 'pen'; this.colour = 0; this.cur = null; this.down = null; this.clearArmed = false; this.rect = null; this.pred = null;
-    this.touches = new Map(); this.tap = new TwoFingerTap(); this.palmAt = -1e9;
+    this.touches = new Map(); this.redoStack = []; this.hist = []; this.erasedSnap = false; this.tap = new TwoFingerTap(); this.palmAt = -1e9;
     this.canvas = h('canvas', { class: 'idea-canvas', 'aria-label': this.label || 'Drawing board', role: 'img' });
     this.ctx = this.canvas.getContext('2d');
     this.live = h('canvas', { class: 'idea-live', 'aria-hidden': 'true' });       // the stroke being written, on top
@@ -160,7 +185,7 @@ export class IdeaBoard {
       e.preventDefault(); this.down = e.pointerId; this.downType = e.pointerType; this.downAt = performance.now(); this.clearArmed = false; this.refreshBar();
       try { c.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
       const [x, y] = this.pos(e);
-      if (this.tool === 'eraser') { this.erased = false; this.eraseAt(x, y); }
+      if (this.tool === 'eraser') { this.erased = false; this.erasedSnap = false; this.eraseAt(x, y); }
       else { this.cur = { c: this.colour, p: [x, y] }; this.drawLive(); }
     });
     c.addEventListener('pointermove', e => {
@@ -188,7 +213,8 @@ export class IdeaBoard {
       if (e.pointerType === 'pen') pencil.pen();
       if (this.touches.has(e.pointerId)) {
         this.touches.delete(e.pointerId);
-        if (this.tap.up(e.pointerId) && e.type === 'pointerup') this.undo();      // two fingers tapped together: undo
+        const tapN = this.tap.up(e.pointerId);
+        if (e.type === 'pointerup') { if (tapN === 2) this.undo(); else if (tapN === 3) this.redo(); }      // two fingers tapped together: undo; three fingers: redo
         if (!this.touches.size) this.tap.reset();
       }
       if (this.down !== e.pointerId) return;
@@ -197,7 +223,7 @@ export class IdeaBoard {
       if (this.tool === 'eraser') { if (this.erased) this.changed(); }
       else if (this.cur) {
         const s = this.cur; this.cur = null; this.pred = null;
-        if (!cancelled) { this.strokes.push(s); this.draw(); this.changed(); } else this.drawLive();
+        if (!cancelled) { this.hist.push(this.strokes.slice()); this.strokes.push(s); this.redoStack = []; this.draw(); this.changed(); } else this.drawLive();
       }
     };
     c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
@@ -207,14 +233,16 @@ export class IdeaBoard {
   }
 
   eraseAt(x, y) {
-    const keep = this.strokes.filter(s => !near(s, x, y));
-    if (keep.length !== this.strokes.length) { this.strokes = keep; this.erased = true; this.draw(); }
+    const out = []; let changed = false;
+    for (const s of this.strokes) { if (near(s, x, y)) { changed = true; out.push(...cutStroke(s, x, y)); } else out.push(s); }
+    if (changed) { if (!this.erasedSnap) { this.hist.push(this.strokes.slice()); this.erasedSnap = true; } this.strokes = out; this.erased = true; this.redoStack = []; this.draw(); }
   }
-  undo() { if (!this.strokes.length) return; this.strokes.pop(); this.draw(); this.changed(); }
+  undo() { if (!this.hist.length) return; this.redoStack.push(this.strokes); this.strokes = this.hist.pop(); this.draw(); this.changed(); }
+  redo() { if (!this.redoStack.length) return; this.hist.push(this.strokes); this.strokes = this.redoStack.pop(); this.draw(); this.changed(); }
   clear() {
     if (!this.strokes.length) return;
     if (!this.clearArmed) { this.clearArmed = true; this.refreshBar(); setTimeout(() => { this.clearArmed = false; this.refreshBar(); }, 2500); return; }
-    this.clearArmed = false; this.strokes = []; this.refreshBar(); this.draw(); this.changed();
+    this.clearArmed = false; this.hist.push(this.strokes); this.redoStack = []; this.strokes = []; this.refreshBar(); this.draw(); this.changed();
   }
   changed() { if (this.onChange) this.onChange(this.strokes.slice()); }
 }
