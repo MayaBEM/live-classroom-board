@@ -548,7 +548,8 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 
 .tbtn { width: 38px; height: 40px; }
 @media (min-width: 1500px) { .tbtn { width: 42px; height: 42px; } }
-@media (max-width: 999px) {
+/* the tools sit on their own row whenever the one-row bar would not fit (the teacher bar needs about 1340px: iPad sideways, small laptops) */
+@media (max-width: 1339px) {
   .b-top { flex-wrap: wrap; padding: 4px 8px 6px; gap: 4px 6px; min-height: 0; }
   .tb-left { flex: 0 1 auto; }
   .tb-right { flex: 1 1 0; justify-content: flex-end; }

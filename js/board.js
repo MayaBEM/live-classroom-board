@@ -508,6 +508,14 @@ export class BoardView {
     this.broadcastView(true);
   }
 
+  // is the whole width of the page on the screen? (then a sideways swipe means "turn the page", not "move the page")
+  fitsAcross() { const { w } = this.stageSize(); return 1000 * this.view.s <= w - 24 + 1; }
+  // go to the next or the previous page with a short slide, like paper; at the first or last page the sheet just nudges
+  turnPage(dir) {
+    const before = this.pageId; this.goPage(dir);
+    const moved = this.pageId !== before;
+    try { this.sheet.animate(moved ? [{ translate: `${dir * 70}px 0`, opacity: 0.25 }, { translate: '0 0', opacity: 1 }] : [{ translate: '0 0' }, { translate: `${-dir * 22}px 0` }, { translate: '0 0' }], { duration: moved ? 220 : 200, easing: 'ease-out' }); } catch (err) { /* older browsers: no slide */ }
+  }
   goPage(d) {
     const ps = this.store.pages, i = ps.findIndex(p => p.id === this.pageId), n = clamp(i + d, 0, ps.length - 1);
     if (ps[n] && ps[n].id !== this.pageId) this.setPage(ps[n].id, { user: true });
@@ -907,11 +915,18 @@ export class BoardView {
     if (!had) return;
     if (this.g) {
       if (this.tap.up(e.pointerId) && !cancelled) this.doUndo();      // two fingers tapped together
+      else if (!cancelled && !this.g.swiped && this.pointers.size === 1) {                // two fingers swept sideways: turn the page
+        const rem = [...this.pointers.values()][0], g = this.g, cx = (e.clientX + rem.x) / 2, cy = (e.clientY + rem.y) / 2;
+        const dx = cx - g.sx, dy = cy - g.sy, d = Math.hypot(e.clientX - rem.x, e.clientY - rem.y), ok = d / g.d > 0.8 && d / g.d < 1.25;
+        if (ok && this.fitsAcross() && Math.abs(dx) > 80 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - g.t < 900) { g.swiped = true; this.turnPage(dx < 0 ? 1 : -1); }
+      }
       if (this.pointers.size < 2) { this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem && this.tool === 'move') this.startPanFrom(rem); }
       return;
     }
     if (this.pan) {
-      const moved = this.pan.moved, tool = this.tool; this.pan = null; this.stage.classList.remove('panning');
+      const P = this.pan, moved = P.moved, tool = this.tool; this.pan = null; this.stage.classList.remove('panning');
+      // a quick sideways swipe of a finger or pencil turns the page, like paper (only when the whole page is across the screen)
+      if (!cancelled && e.pointerType !== 'mouse' && P.t) { const dx = e.clientX - P.x, dy = e.clientY - P.y; if (this.fitsAcross() && Math.abs(dx) > 80 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - P.t < 700) { this.turnPage(dx < 0 ? 1 : -1); return; } }
       if (!moved && !cancelled && tool === 'move' && !this.pointers.size) this.whoWrote(this.toPage(e), e);
       return;
     }
@@ -1008,7 +1023,7 @@ export class BoardView {
   // ---- gestures
   startPan(e) {
     this.userMoved(); this.autoFit = false;
-    this.pan = { x: e.clientX, y: e.clientY, tx: this.view.tx, ty: this.view.ty, moved: false };
+    this.pan = { x: e.clientX, y: e.clientY, tx: this.view.tx, ty: this.view.ty, moved: false, t: performance.now() };
     this.stage.classList.add('panning');
   }
   startPanFrom(pt) { this.userMoved(); this.pan = { x: pt.x, y: pt.y, tx: this.view.tx, ty: this.view.ty, moved: true }; this.stage.classList.add('panning'); }
@@ -1020,7 +1035,7 @@ export class BoardView {
   startGesture() {
     this.userMoved(); this.autoFit = false; this.pan = null;
     const [a, b] = [...this.pointers.values()], r = this.stage.getBoundingClientRect();
-    this.g = { cx: (a.x + b.x) / 2 - r.left, cy: (a.y + b.y) / 2 - r.top, d: Math.hypot(a.x - b.x, a.y - b.y) || 1, v: { ...this.view } };
+    this.g = { cx: (a.x + b.x) / 2 - r.left, cy: (a.y + b.y) / 2 - r.top, d: Math.hypot(a.x - b.x, a.y - b.y) || 1, v: { ...this.view }, sx: (a.x + b.x) / 2, sy: (a.y + b.y) / 2, t: performance.now(), swiped: false };
   }
   updateGesture() {
     const [a, b] = [...this.pointers.values()], r = this.stage.getBoundingClientRect(), g = this.g;
