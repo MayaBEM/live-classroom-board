@@ -69,7 +69,9 @@ export class BoardView {
     if (this.isTeacher && !this.assign && !this.review) setTimeout(() => this.syncInstrShare(), 300);
     this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: this.isTeacher });
     this.renderTop(); this.renderRail(); this.renderOpts(); this.placePop();
-    this.ro2 = new ResizeObserver(() => this.placePop()); this.ro2.observe(this.elTop);
+    this.ro2 = new ResizeObserver(() => { this.fitTop(); this.placePop(); }); this.ro2.observe(this.elTop);
+    this.fitTimer = setInterval(() => this.fitTop(), 1200);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.fitTop());
     this.unsubs = [
       st.on('objects', (pids, id) => this.onObjects(pids, id)),
       st.on('pages', () => this.onPages()),
@@ -104,7 +106,7 @@ export class BoardView {
     document.body.classList.remove('in-board');
     this.unsubs.forEach(u => u()); this.ro.disconnect(); if (this.ro2) this.ro2.disconnect();
     document.removeEventListener('keydown', this.keyHandler); document.removeEventListener('keyup', this.keyUp);
-    clearInterval(this.tick); clearInterval(this.lockTimer); clearInterval(this.shareTimer);
+    clearInterval(this.tick); clearInterval(this.lockTimer); clearInterval(this.shareTimer); clearInterval(this.fitTimer);
     this.instr.detach(); this.timerCtl.destroy();
     if (this.review) this.store.unwatch();
     if (!this.embedded) this.store.close();
@@ -151,6 +153,16 @@ export class BoardView {
   penActive() { if (pencil.recent()) return true; for (const p of this.pointers.values()) if (p.type === 'pen') return true; return false; }
 
   // ----------------------------------------------------------------- top bar
+  // Measure the three parts of the bar. When they do not all fit on one row, the tools go to their own row below.
+  fitTop() {
+    const top = this.elTop; if (!top || !this.tbLeft || !this.elRail || !this.tbRight || !top.isConnected) return;
+    const sum = el => [...el.children].reduce((n, c) => n + (c.hidden ? 0 : c.getBoundingClientRect().width), 0) + Math.max(0, el.children.length - 1) * 4 + 4;
+    const rail = [...this.elRail.children].reduce((n, c) => n + (c.hidden ? 0 : c.getBoundingClientRect().width), 0) + Math.max(0, this.elRail.children.length - 1) * 2 + 16;     // (its natural width: below the bar it is stretched to the full width)
+    const need = sum(this.tbLeft) + rail + sum(this.tbRight) + 40 + 24;
+    const below = top.classList.contains('tools-below'), room = top.clientWidth;
+    if (!below && need > room) top.classList.add('tools-below');
+    else if (below && need < room - 60) top.classList.remove('tools-below');
+  }
   renderTop() {
     const st = this.store, L = [], Rt = [];
     const brand = h('span', { class: 'brand' }, h('img', { class: 'mark', src: asset('img/logo-mark.png'), alt: '' }), h('img', { class: 'word', src: asset('img/logo-word.png'), alt: 'Bright EngMath' }));
@@ -213,6 +225,7 @@ export class BoardView {
     this.tbLeft.replaceChildren(...L); this.tbRight.replaceChildren(...Rt);
     this.renderStatus(st.sync);
     this.updateTopState(); this.renderPrivBtn();
+    requestAnimationFrame(() => this.fitTop());
   }
 
   exitBoard() { this.destroy(); if (this.onBack) this.onBack(); }
@@ -694,7 +707,7 @@ export class BoardView {
   async setPrivate(on) {
     if (!this.isTeacher) return;
     this.commitEditor(); this.privateMode = this.store.privateMode = on;
-    this.syncInstrShare(); this.renderPrivBtn();
+    this.syncInstrShare(); this.renderPrivBtn(); requestAnimationFrame(() => this.fitTop());
     if (on) { toast('Private: students cannot see what you do now.', 'ok'); return; }
     const n = this.store.hiddenIds().length;
     if (n) {

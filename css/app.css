@@ -548,14 +548,12 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 
 .tbtn { width: 38px; height: 40px; }
 @media (min-width: 1500px) { .tbtn { width: 42px; height: 42px; } }
-/* the tools sit on their own row whenever the one-row bar would not fit (the teacher bar needs about 1700px when she is working in private: iPad sideways, laptops) */
-@media (max-width: 1699px) {
-  .b-top { flex-wrap: wrap; padding: 4px 8px 6px; gap: 4px 6px; min-height: 0; }
-  .tb-left { flex: 0 1 auto; }
-  .tb-right { flex: 1 1 0; justify-content: flex-end; }
-  .tb-tools { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; justify-content: center; }
-  .tb-tools::-webkit-scrollbar { display: none; }
-}
+/* The tools sit on their own row whenever the one-row bar would not fit. The page measures this itself (fitTop in board.js) and adds .tools-below, whatever the screen width. */
+.b-top.tools-below { flex-wrap: wrap; padding: 4px 8px 6px; gap: 4px 6px; min-height: 0; }
+.b-top.tools-below .tb-left { flex: 0 1 auto; }
+.b-top.tools-below .tb-right { flex: 1 1 0; justify-content: flex-end; }
+.b-top.tools-below .tb-tools { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; justify-content: center; }
+.b-top.tools-below .tb-tools::-webkit-scrollbar { display: none; }
 @media (max-width: 719px) { .tb-tools { justify-content: flex-start; } .tb-right { justify-content: flex-start; overflow-x: auto; } }
 @media (max-width: 719px) {
   .b-pop { flex-wrap: wrap; justify-content: center; row-gap: 8px; overflow: visible; width: calc(100% - 16px); }
@@ -946,7 +944,8 @@ input, textarea, select { font-size: max(16px, 1em); }
 .tbtn.priv { width: auto; min-width: 42px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; }
 .tbtn.priv .lbl { display: inline; font-size: 14px; font-weight: 600; }
 .tbtn.priv.on { background: var(--orange); color: var(--ink); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
-@media (max-width: 1699px) { .tbtn.priv .lbl { display: none; } }
+/* (the Students see / Private button is just its icon: its tooltip and the Private tag say the rest) */
+.tbtn.priv .lbl { display: none; }
 .b-pop { flex-wrap: wrap; justify-content: center; row-gap: 8px; }
 .b-pop .grp.wrap { flex: 0 1 auto; max-width: 100%; }
 
