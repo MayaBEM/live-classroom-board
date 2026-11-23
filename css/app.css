@@ -977,3 +977,27 @@ input, textarea, select { font-size: max(16px, 1em); }
 .bc-cover img { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; -webkit-user-select: none; user-select: none; pointer-events: none; }
 .bcard .bc-main { flex: 1; min-width: 0; }
 @media (max-width: 560px) { .bc-cover { align-self: center; width: 132px; } }
+
+/* the student's work as a bookshelf: covers stand on a wooden shelf, the title is below, a tap opens the book */
+.shelf { --gap: 22px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px var(--gap); align-items: start; padding: 6px 0 4px; }
+.book { appearance: none; display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: left; background: none; border: 0; padding: 0; color: var(--ink); cursor: pointer; min-width: 0; font: inherit; transition: transform .12s; }
+.book:hover:not(:disabled) { transform: translateY(-4px); }
+.book:active:not(:disabled) { transform: translateY(0) scale(.98); }
+.book:disabled { cursor: default; }
+.book.busy { opacity: .6; pointer-events: none; }
+.book-top { position: relative; display: block; padding-bottom: 16px; }
+.book-top::after { content: ''; position: absolute; left: calc(var(--gap) / -2); right: calc(var(--gap) / -2); bottom: 0; height: 16px; background: #C9A877; border-top: 3px solid #E4CD9F; border-bottom: 4px solid #8E6B3E; box-shadow: 0 5px 0 rgba(30,30,20,.10); }
+.book-face { position: relative; display: block; z-index: 1; aspect-ratio: 210 / 297; background: #fff; border: 1px solid rgba(30,30,20,.28); box-shadow: inset 7px 0 0 rgba(30,30,20,.13), 3px 3px 0 rgba(30,30,20,.16); margin-bottom: -1px; overflow: hidden; }
+.book-cv { display: block; width: 100%; height: 100%; }
+.book-cv img { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; -webkit-user-select: none; user-select: none; pointer-events: none; }
+.book-ph { display: grid; place-items: center; width: 100%; height: 100%; box-sizing: border-box; padding: 14px 12px 14px 20px; background: var(--tile, var(--sun)); font-size: 20px; font-weight: 700; line-height: 1.2; text-align: center; overflow-wrap: anywhere; overflow: hidden; }
+.book .new-badge { position: absolute; top: 8px; left: 8px; margin: 0; z-index: 2; }
+.book-ribbon { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 8px; font-size: 13px; font-weight: 600; text-align: center; border-top: 1px solid rgba(30,30,20,.3); z-index: 2; }
+.book-ribbon.sent { background: var(--sun); } .book-ribbon.checked { background: var(--mint); } .book-ribbon.lock { background: #E4E1D7; color: #5b5f57; }
+.book.locked .book-face { filter: grayscale(.85) opacity(.7); }
+.book-title { font-size: 17px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.book .due-chip { align-self: flex-start; }
+.book.is-new { animation: none; }
+.book.is-new .book-face { outline: 3px solid var(--orange); outline-offset: 0; }
+.me-work .shelf { max-width: none; }
+@media (max-width: 560px) { .shelf { --gap: 16px; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); } .book-title { font-size: 14px; } .book-ph { font-size: 14px; padding: 8px 6px 8px 12px; } .book-ribbon { font-size: 11px; padding: 3px 4px; } }

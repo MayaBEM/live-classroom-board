@@ -9,7 +9,7 @@ import { iconEl } from './icons.js';
 import { CONFIG } from '../config.js';
 import { appThumb } from './shelf.js';
 import { IdeaBoard } from './idea.js';
-import { coverBox, fillCovers } from './covers.js';
+import { bookCover, fillCovers } from './covers.js';
 
 const MESSAGES = {
   NAME_IN_USE: 'Someone is using that name right now. Add the first letter of your last name, like "Emma K".',
@@ -26,6 +26,19 @@ const MESSAGES = {
 };
 const msgFor = e => { const m = (e && e.message) || ''; for (const k of Object.keys(MESSAGES)) if (m.includes(k)) return MESSAGES[k]; return friendlyError(e); };
 const TILE = ['c1', 'c2', 'c3', 'c4', 'c5'];
+
+const whenShort = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+// one piece of work as a book on the shelf: its cover (the first page of the file), the title, and a tap opens it
+function bookEl(b, { fresh, idx, onOpen }) {
+  const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, d = dueInfo(b.due_at, b.status);
+  const ph = h('span', { class: 'book-ph ' + TILE[idx % TILE.length] }, (b.title || '').trim());
+  const ribbon = b.status === 'checked' ? ['checked', 'Checked' + (b.score ? ` · ${b.score}` : '')] : b.status === 'sent' ? ['sent', 'Sent'] : locked ? ['lock', b.starts_at ? 'Opens ' + whenShort(b.starts_at) : 'Not open yet'] : null;
+  const el = h('button', { class: 'book ' + cls + (fresh ? ' is-new' : '') + (locked ? ' locked' : ''), disabled: locked, title: b.title, 'aria-label': (b.title || 'Work') + '. ' + label },
+    h('span', { class: 'book-top' }, h('span', { class: 'book-face' }, bookCover(b.id, ph), fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, ribbon ? h('span', { class: 'book-ribbon ' + ribbon[0] }, ribbon[1]) : null)),
+    h('span', { class: 'book-title' }, b.title), d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null);
+  el.addEventListener('click', async () => { if (el.classList.contains('busy')) return; el.classList.add('busy'); try { await onOpen(); } finally { el.classList.remove('busy'); } });
+  return el;
+}
 
 // the list of all of a student's work, for the bar that slides out from the left of a board
 function workPanelDom(boards, currentCode, pick) {
@@ -350,20 +363,11 @@ export async function startClass(root, classCode) {
       onSwitch: b => switchTo({ sb, root, b, name, pin, onBack: refresh, work }),
     };
     const newsKey = `bem-checked-class-${classCode}-${name}`, news = checkedNews(data.boards, newsKey);
-    const card = b => {
-      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b);
-      return h('div', { class: 'bcard ' + cls + (isNews ? ' is-new' : '') },
-        coverBox(b.id),
-        h('div', { class: 'bc-main' }, h('b', null, isNews ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
-          h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
-            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
-          h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
-        h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
-          const btn = e.currentTarget; btn.disabled = true; clearInterval(classPoll);
-          const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
-          if (r) { btn.disabled = false; toast(r.text, 'bad'); }
-        } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : 'Open'));
-    };
+    const card = (b, i) => bookEl(b, { fresh: news.includes(b), idx: i, onOpen: async () => {
+      clearInterval(classPoll);
+      const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
+      if (r) toast(r.text, 'bad');
+    } });
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort), done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
     page('no-art me-wide',
       h('div', { class: 'join-head' }, h('p', { class: 'hint' }, data.class), h('h1', null, `Hi, ${data.name}!`), teacherTag()),
@@ -371,8 +375,8 @@ export async function startClass(root, classCode) {
         appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
         h('div', { class: 'me-work' },
           data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'No boards yet. '), 'When your teacher adds one, it shows up here.'),
-          todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
-          done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
+          todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'shelf' }, todo.map(card)),
+          done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'shelf' }, done.map(card)),
           h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
     fillCovers(sb, data.boards.map(b => b.id));
@@ -505,23 +509,11 @@ export async function startMe(root, pageCode, opts = {}) {
       onSwitch: b => switchTo({ sb, root, b, name, pin, onBack: refresh, work }),
     };
     const newsKey = `bem-checked-${pageCode}`, news = asTeacher ? [] : checkedNews(data.boards, newsKey);
-    const card = b => {
-      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b), fresh = (b.status === 'new' && !locked) || isNews;
-      return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
-        coverBox(b.id),
-        h('div', { class: 'bc-main' },
-          h('b', null, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
-          h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
-            b.class ? h('span', null, b.class) : null,
-            b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
-          h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
-        h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
-          const btn = e.currentTarget; btn.disabled = true;
-          if (asTeacher) { location.hash = '#/board/' + b.id; return; }     // the teacher opens it in her own screens
-          stopIdea(); const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
-          if (r) { btn.disabled = false; toast(r.text, 'bad'); }
-        } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : fresh ? 'Start' : 'Open'));
-    };
+    const card = (b, i) => bookEl(b, { fresh: (b.status === 'new' && !!b.code) || news.includes(b), idx: i, onOpen: async () => {
+      if (asTeacher) { location.hash = '#/board/' + b.id; return; }     // the teacher opens it in her own screens
+      stopIdea(); const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work });
+      if (r) toast(r.text, 'bad');
+    } });
     const fresh = data.boards.filter(b => b.status === 'new' && b.code);
     const todo = data.boards.filter(b => b.status === 'new' || b.status === 'working' || b.status === 'live').sort(dueSort);
     const done = data.boards.filter(b => b.status === 'sent' || b.status === 'checked');
@@ -535,8 +527,8 @@ export async function startMe(root, pageCode, opts = {}) {
         appsSection(data.apps, `bem-seen-${pageCode}`),
         h('div', { class: 'me-work' },
         data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
-        todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
-        done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
+        todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'shelf' }, todo.map(card)),
+        done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'shelf' }, done.map(card)),
         h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), asTeacher ? null : h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
     fillCovers(sb, data.boards.map(b => b.id));

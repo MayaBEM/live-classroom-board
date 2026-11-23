@@ -40,6 +40,12 @@ export function coverBox(id) {
   if (cache.get(id)) show(box, cache.get(id)); else { (boxes.get(id) || boxes.set(id, []).get(id)).push(box); }
   return box;
 }
+// the same, for the bookshelf: the box is always there, showing `ph` (a plain coloured tile) until the picture arrives
+export function bookCover(id, ph) {
+  const box = h('span', { class: 'book-cv', 'aria-hidden': 'true' }, ph);
+  if (cache.get(id)) show(box, cache.get(id)); else (boxes.get(id) || boxes.set(id, []).get(id)).push(box);
+  return box;
+}
 function show(box, url) { box.replaceChildren(h('img', { src: url, alt: '', draggable: 'false' })); box.hidden = false; }
 export async function fillCovers(sb, ids) {
   const need = ids.filter(id => !cache.has(id)).slice(0, 80);
