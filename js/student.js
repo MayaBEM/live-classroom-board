@@ -39,6 +39,25 @@ function workPanelDom(boards, currentCode, pick) {
   return h('div', { class: 'wd-body' }, todo.length ? h('h3', null, 'To do') : null, todo.map(row), done.length ? h('h3', null, 'Sent') : null, done.map(row), boards.length ? null : h('p', { class: 'hint', style: { padding: '14px' } }, 'No work yet.'));
 }
 
+// For a student who came in with a board link (not their own page): the boards they have opened so far, taken from their own records
+function joinWork(sb, name, pin, root, boardId) {
+  const work = {
+    workPanel: async ({ currentCode, pick }) => {
+      // the whole list for a student on a class list (every piece of work, also what is not opened yet) ...
+      if (boardId) { const r = await sb.rpc('my_work_after_join', { p_board: boardId }); const list = r.data && r.data.boards; if (list && list.length) return workPanelDom(list, currentCode, pick); }
+      // ... or, if there is no list, the boards this student has opened so far
+      const { data: parts } = await sb.from('participants').select('board_id,submitted_at,score,comment,checked_at');
+      const ids = (parts || []).map(p => p.board_id), pm = new Map((parts || []).map(p => [p.board_id, p]));
+      const { data: bs } = ids.length ? await sb.from('boards').select('id,code,title,mode,due_at,starts_at,created_at').in('id', ids) : { data: [] };
+      const boards = (bs || []).map(b => { const p = pm.get(b.id) || {}; return { id: b.id, code: b.starts_at && Date.parse(b.starts_at) > Date.now() ? null : b.code, title: b.title, mode: b.mode, due_at: b.due_at, created_at: b.created_at, score: p.score,
+        status: b.mode !== 'assignment' ? 'live' : p.submitted_at && (p.checked_at || p.score || p.comment) ? 'checked' : p.submitted_at ? 'sent' : 'working' }; }).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      return workPanelDom(boards, currentCode, pick);
+    },
+    onSwitch: b => switchTo({ sb, root, b, name, pin, onBack: null, work }),
+  };
+  return work;
+}
+
 // how soon is it due: "Overdue", "Due today", "Due tomorrow", or the date
 function dueInfo(due_at, status) {
   if (!due_at || status === 'sent' || status === 'checked') return null;
@@ -129,7 +148,7 @@ export async function startStudent(root, code) {
       try { localStorage.setItem(saveKey, JSON.stringify({ name: data.name })); } catch (e) { /* ignore */ }
       const store = new Store(sb, { boardId: data.board_id, role: 'student', participantId: data.participant_id, name: data.name });
       await store.load(); await store.connect();
-      new BoardView({ sb, store, role: 'student', root, code, onExit: () => {} }).start();
+      new BoardView({ sb, store, role: 'student', root, code, onExit: () => {}, ...joinWork(sb, data.name, pin, root, data.board_id) }).start();
       return null;
     } catch (e) { console.error(e); const m = (e && e.message) || ''; return { key: Object.keys(MESSAGES).find(k => m.includes(k)) || '', text: msgFor(e) }; }
   };
@@ -209,16 +228,42 @@ function askCode(root) {
 
 
 // open one board (used by the class page)
-async function enterBoard({ sb, root, code, name, pin, onBack, workPanel = null, onSwitch = null }) {
-  try {
-    const { data, error } = await sb.rpc('join_board', { p_code: code, p_name: name, p_pin: pin || null });
-    if (error) throw error;
-    if (data && data.error) throw new Error(data.error);
-    const store = new Store(sb, { boardId: data.board_id, role: 'student', participantId: data.participant_id, name: data.name });
-    await store.load(); await store.connect();
-    new BoardView({ sb, store, role: 'student', root, code, onBack, onExit: () => {}, workPanel, onSwitch }).start();
-    return null;
-  } catch (e) { console.error(e); const m = (e && e.message) || ''; return { key: Object.keys(MESSAGES).find(k => m.includes(k)) || '', text: msgFor(e) }; }
+// join a board and get it ready; start() puts it on the screen
+async function prepareBoard({ sb, root, code, name, pin, onBack, workPanel = null, onSwitch = null }) {
+  const { data, error } = await sb.rpc('join_board', { p_code: code, p_name: name, p_pin: pin || null });
+  if (error) throw error;
+  if (data && data.error) throw new Error(data.error);
+  const store = new Store(sb, { boardId: data.board_id, role: 'student', participantId: data.participant_id, name: data.name });
+  await store.load(); await store.connect();
+  return { start: () => new BoardView({ sb, store, role: 'student', root, code, onBack, onExit: () => {}, workPanel, onSwitch }).start() };
+}
+async function enterBoard(opts) {
+  try { (await prepareBoard(opts)).start(); return null; }
+  catch (e) { console.error(e); const m = (e && e.message) || ''; return { key: Object.keys(MESSAGES).find(k => m.includes(k)) || '', text: msgFor(e) }; }
+}
+// ask for the 4-number code (when another board needs it and this device does not know it yet)
+function askPin() {
+  return new Promise(resolve => {
+    const input = h('input', { class: 'input', inputmode: 'numeric', maxlength: '4', pattern: '[0-9]*', autocomplete: 'off', 'aria-label': 'Your 4-number code', placeholder: '4 numbers', style: { fontSize: '24px', textAlign: 'center', letterSpacing: '.3em' } });
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 4); if (input.value.length === 4) { done = true; m.close(); resolve(input.value); } });
+    let done = false;
+    const m = modal({ title: 'Type your code', body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'This board needs your 4-number code.'), input), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel')], onClose: () => { if (!done) resolve(null); } });
+    setTimeout(() => input.focus(), 60);
+  });
+}
+// the switch used by "My work": make the other board ready (asking for the code if needed), or say what went wrong
+async function switchTo({ sb, root, b, name, pin, onBack, work }) {
+  if (!b.code) { toast('That one is not open yet.', 'bad'); return null; }
+  let use = pin;
+  for (let tries = 0; tries < 3; tries++) {
+    try { return await prepareBoard({ sb, root, code: b.code, name, pin: use, onBack, ...work }); }
+    catch (e) {
+      const m = (e && e.message) || '';
+      if (/PIN_REQUIRED|PIN_WRONG/.test(m)) { const p = await askPin(); if (!p) return null; use = p; continue; }
+      toast(msgFor(e), 'bad'); return null;
+    }
+  }
+  return null;
 }
 
 const STATUS = {
@@ -298,7 +343,7 @@ export async function startClass(root, classCode) {
     const refresh = async () => { clearInterval(classPoll); const r = await portal(name, pin); if (r.data) showBoards(r.data, name, pin); };
     const work = {
       workPanel: async ({ currentCode, pick }) => { const r = await portal(name, pin); return workPanelDom(r.data ? r.data.boards : data.boards, currentCode, pick); },
-      onSwitch: async b => { const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work }); if (r) toast(r.text, 'bad'); },
+      onSwitch: b => switchTo({ sb, root, b, name, pin, onBack: refresh, work }),
     };
     const newsKey = `bem-checked-class-${classCode}-${name}`, news = checkedNews(data.boards, newsKey);
     const card = b => {
@@ -451,7 +496,7 @@ export async function startMe(root, pageCode, opts = {}) {
     const refresh = async () => { stopIdea(); const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
     const work = {
       workPanel: async ({ currentCode, pick }) => { const r = await portal(pin); return workPanelDom(r.data ? r.data.boards : data.boards, currentCode, pick); },
-      onSwitch: async b => { const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh, ...work }); if (r) toast(r.text, 'bad'); },
+      onSwitch: b => switchTo({ sb, root, b, name, pin, onBack: refresh, work }),
     };
     const newsKey = `bem-checked-${pageCode}`, news = asTeacher ? [] : checkedNews(data.boards, newsKey);
     const card = b => {

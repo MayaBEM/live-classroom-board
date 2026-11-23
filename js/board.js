@@ -203,7 +203,7 @@ export class BoardView {
       }
       Rt.push(this.btnPages);
     }
-    if (this.workPanel && !this.isTeacher) L.unshift(tb('menu', 'My work', () => this.openWork()));     // a student: the list of all their work, in a bar that slides out from the left
+    if (this.workPanel && !this.isTeacher) { const at = L[0] && /back|boards/i.test((L[0].getAttribute && L[0].getAttribute('aria-label')) || '') ? 1 : 0; L.splice(at, 0, tb('sidebar', 'My work', () => this.openWork())); }     // a student: the list of all their work, in a bar that slides out from the left (right next to the back arrow)
     L.splice(L.indexOf(this.elStatus) + 1, 0, this.timerCtl.el);
     this.tbLeft.replaceChildren(...L); this.tbRight.replaceChildren(...Rt);
     this.renderStatus(st.sync);
@@ -1335,7 +1335,8 @@ export class BoardView {
     catch (e) { this.drawer.replaceChildren(head, h('p', { class: 'error', style: { padding: '14px' } }, 'Could not load your work. Check your internet.')); }
   }
   closeWork() { this.drawer.classList.remove('open'); this.drawerBack.hidden = true; setTimeout(() => { if (!this.drawer.classList.contains('open')) this.drawer.hidden = true; }, 260); }
-  switchBoard(b) { if (!b || b.code === this.code || !this.onSwitch) return; this.destroy(); this.onSwitch(b); }
+  // the next board is made ready first; only then is this one closed (so a wrong code or a bad connection never leaves a blank screen)
+  async switchBoard(b) { if (!b || b.code === this.code || !this.onSwitch) return; const next = await this.onSwitch(b); if (!next) return; this.destroy(); next.start(); }
 
   // ---- a student's own extra pages (assignment copies)
   addMyPageDialog() {
