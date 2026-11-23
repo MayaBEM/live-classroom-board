@@ -365,9 +365,9 @@ export async function startMe(root, pageCode) {
     const status = h('span', { class: 'idea-status' }, '');
     const badge = h('span', { class: 'new-badge', hidden: !isNew(idea) }, 'NEW');
     const replyBox = h('p', { class: 'idea-reply', hidden: !idea.reply }, idea.reply || '');
-    let latest = idea.strokes || [], dirty = false;
+    let latest = idea.strokes || [], dirty = false, firstAt = 0;
     const save = async () => {
-      clearTimeout(ideaTimer); if (!dirty) return; dirty = false; status.textContent = 'Saving…';
+      clearTimeout(ideaTimer); firstAt = 0; if (!dirty) return; dirty = false; status.textContent = 'Saving…';
       try {
         const { data: r, error } = await sb.rpc('idea_save', { p_page: pageCode, p_pin: pin, p_strokes: latest });
         if (error || (r && r.error)) throw new Error('save');
@@ -375,7 +375,7 @@ export async function startMe(root, pageCode) {
       } catch (e) { dirty = true; status.textContent = 'Not saved. Check your internet.'; }
     };
     ideaFlush = () => { if (dirty) save(); };
-    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: 'Tell Teacher Maya', onChange: list => { latest = list; dirty = true; status.textContent = 'Writing…'; clearTimeout(ideaTimer); ideaTimer = setTimeout(save, 1200); } });
+    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: 'Tell Teacher Maya', onChange: list => { latest = list; dirty = true; status.textContent = 'Writing…'; clearTimeout(ideaTimer); if (!firstAt) firstAt = Date.now(); ideaTimer = setTimeout(save, Math.max(0, Math.min(3000, firstAt + 8000 - Date.now()))); } });
     const big = h('button', { type: 'button', class: 'ib', 'aria-label': 'Make the board bigger', title: 'Bigger', onclick: () => {
       const on = !inner.classList.contains('big');
       if (on) slot.style.minHeight = inner.offsetHeight + 'px';

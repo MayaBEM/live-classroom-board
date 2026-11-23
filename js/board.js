@@ -1,5 +1,6 @@
 // The board screen: page view, drawing tools, live sync, follow-me, lock, laser, panels.
 import { h, uuid, clamp, debounce, throttle, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE } from './util.js';
+import { pencil, TwoFingerTap } from './pencil.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
   PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS } from './render.js';
@@ -38,7 +39,7 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.penSeen = false; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -66,6 +67,7 @@ export class BoardView {
       st.on('instr', p => { if (!this.isTeacher) this.instr.setRemote(p); }),
       st.on('denied', () => toast(st.board && st.board.locked ? 'Writing is locked by your teacher.' : 'That change was not saved.', 'bad')),
       st.on('removed', () => this.showRemoved()),
+      pencil.subscribe(() => this.renderRail()),
     ];
     this.ro = new ResizeObserver(() => this.onResize());
     this.ro.observe(this.stage);
@@ -116,7 +118,12 @@ export class BoardView {
     s.addEventListener('wheel', e => this.onWheel(e), { passive: false });
     s.addEventListener('contextmenu', e => e.preventDefault());
     this.tick = setInterval(() => this.renderStatusTime(), 5000);
+    // a resting hand must not press the colours or any button while the pencil is writing
+    const ui = '.b-top, .b-pop, .zoom-pill, .b-side';
+    this.el.addEventListener('pointerdown', e => { if (e.pointerType === 'touch' && this.penActive() && e.target.closest && e.target.closest(ui)) { e.preventDefault(); e.stopPropagation(); this.palmAt = performance.now(); } }, true);
+    this.el.addEventListener('click', e => { if (performance.now() - this.palmAt < 700 && e.target.closest && e.target.closest(ui)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
   }
+  penActive() { if (pencil.recent()) return true; for (const p of this.pointers.values()) if (p.type === 'pen') return true; return false; }
 
   // ----------------------------------------------------------------- top bar
   renderTop() {
@@ -241,6 +248,7 @@ export class BoardView {
   async submitWork() {
     const ok = await confirmDialog({ title: 'Submit your work?', text: 'After you submit, you cannot change your answers. Your teacher will check your work.', confirmLabel: 'Yes, submit' });
     if (!ok) return;
+    this.store.flushNow();
     for (let i = 0; i < 40 && this.store.dirty.size; i++) await new Promise(r => setTimeout(r, 250));
     if (this.store.dirty.size) return toast('Your work is still saving. Wait a moment and try again.', 'bad');
     const { data, error } = await this.sb.rpc('submit_work', { p_participant: this.store.participantId });
@@ -334,6 +342,8 @@ export class BoardView {
       items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', 'aria-label': label, onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k, 22)));
     }
     if (this.isTeacher && !this.assign && this.instr.any()) items.push(h('button', { class: 'tbtn' + (this.instr.sharing ? ' on' : ''), 'aria-pressed': String(this.instr.sharing), title: this.instr.sharing ? 'The class sees your instruments. Tap to hide' : 'Show my protractor and ruler to the class', 'aria-label': 'Show my instruments to the class', onclick: () => this.toggleShareInstr() }, iconEl('eye', 22)));
+    const only = pencil.only;
+    items.push(h('span', { class: 'tsep' }), h('button', { class: 'tbtn pencil-only', 'aria-pressed': String(only), title: only ? 'Pencil only is ON: fingers move and zoom the page, they do not write. Tap to let fingers write' : 'Pencil only is OFF: fingers can write. Tap to write with the pencil only', 'aria-label': only ? 'Pencil only is on. Tap to let fingers write' : 'Pencil only is off. Tap to write with the pencil only', onclick: () => pencil.toggle() }, iconEl('hand', 22)));
     this.elRail.replaceChildren(...items);
     this.updateUndo();
   }
@@ -593,8 +603,8 @@ export class BoardView {
     ctx.setTransform(q, 0, 0, q, 0, 0);
     let again = false;
     for (const [id, g] of this.ghosts) {
-      if (now - g.t > 6000) { this.ghosts.delete(id); continue; }
-      if (g.page_id === this.pageId) { drawObject(ctx, g); again = again || now - g.t < 6000; }
+      if (now - g.t > 15000) { this.ghosts.delete(id); continue; }
+      if (g.page_id === this.pageId) { drawObject(ctx, g); again = again || now - g.t < 15000; }
     }
     if (this.ghosts.size) again = true;
     if (this.cur) {
@@ -744,14 +754,20 @@ export class BoardView {
     if (!this.page) return;
     if (e.target.closest('.text-editor, .banner')) return;
     if (e.pointerType === 'mouse' && e.button > 1) return;
+    if (e.pointerType === 'pen') {
+      pencil.pen();
+      // the pencil wins over a hand that landed first: forget those fingers (and any stroke, zoom or pan they started)
+      for (const [id, p] of [...this.pointers]) if (p.type === 'touch') this.pointers.delete(id);
+      if (this.g || this.pan || this.cur) { this.g = null; this.pan = null; this.stage.classList.remove('panning'); this.cancelCurrent(); this.suppress = false; }
+      this.tap.reset();
+    } else if (e.pointerType === 'touch' && this.penActive()) return;     // a resting hand while the pencil writes: ignored completely
     try { this.stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    if (e.pointerType === 'pen') this.penSeen = true;
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     if (this.editor) { const wasText = this.tool === 'text'; this.commitEditor(); if (wasText) this.skipTextOpen = true; }
-    if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); return; }
+    if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); this.tap.down(this.pointers); return; }   // two fingers never write: they zoom, move, or (a quick tap) undo
     this.suppress = false;
-    // a finger or palm resting on the screen while writing with a pencil does nothing (two fingers still zoom)
-    if (e.pointerType === 'touch' && this.penSeen && this.tool !== 'move') { this.suppress = true; return; }
+    // "Pencil only": a finger only moves the page
+    if (e.pointerType === 'touch' && pencil.only) { this.startPan(e); return; }
     const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (!this.toolAllowed(this.tool));
     if (panning) { this.startPan(e); return; }
     const p = this.toPage(e); this.downAt = { x: e.clientX, y: e.clientY, p, moved: false };
@@ -772,13 +788,14 @@ export class BoardView {
   }
 
   onMove(e) {
+    if (e.pointerType === 'pen') pencil.pen();
     const pt = this.pointers.get(e.pointerId);
     if (!pt) {
       if (this.tool === 'laser' && this.isTeacher && this.page && e.pointerType === 'mouse') this.laserMove(this.toPage(e));
       return;
     }
     pt.x = e.clientX; pt.y = e.clientY;
-    if (this.g) { this.updateGesture(); return; }
+    if (this.g) { this.tap.move(e.pointerId, e.clientX, e.clientY); if (this.tap.s && !this.tap.s.moved) return; this.updateGesture(); return; }
     if (this.pan) { this.updatePan(e); return; }
     if (!this.downAt) return;
     if (Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 5) this.downAt.moved = true;
@@ -807,6 +824,7 @@ export class BoardView {
     try { this.stage.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     if (!had) return;
     if (this.g) {
+      if (this.tap.up(e.pointerId) && !cancelled) this.doUndo();      // two fingers tapped together
       if (this.pointers.size < 2) { this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem && this.tool === 'move') this.startPanFrom(rem); }
       return;
     }

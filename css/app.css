@@ -829,3 +829,14 @@ input, textarea, select { font-size: max(16px, 1em); }
   .idea-slot, .idea-wrap.big { width: 100%; }
   .me-apps .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 }
+
+/* ---- writing: nothing on a board may be selected, dragged or highlighted while someone writes (so the colour bar is never "picked" by a pen drag or a long press) */
+.board, .board *, .idea-board, .idea-board * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.board input, .board textarea, .board [contenteditable], .board .text-editor, .idea-board input { -webkit-user-select: text; user-select: text; }
+.b-top, .b-pop, .idea-bar { touch-action: manipulation; }
+.idea-live { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+/* "Pencil only" buttons: a hand, struck through while it is on */
+.tbtn.pencil-only, .ib.pencilonly { position: relative; }
+.tbtn.pencil-only[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #fff; }
+.tbtn.pencil-only[aria-pressed="true"]::after, .ib.pencilonly[aria-pressed="true"]::after { content: ''; position: absolute; left: 22%; right: 22%; top: 50%; height: 2px; background: currentColor; transform: rotate(-45deg); }
+.ib.pencilonly[aria-pressed="true"] { background: var(--teal); border-color: var(--teal); color: #fff; outline: none; }

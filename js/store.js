@@ -4,6 +4,8 @@
 //  - Live strokes in progress travel by Realtime broadcast; finished marks are saved in the database.
 import { uuid, debounce, sleep } from './util.js';
 
+const SAVE_AFTER = 3000, SAVE_MAX = 8000;   // ms
+
 const rowOf = o => ({ id: o.id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, type: o.type, data: o.data, deleted: !!o.deleted, created_at: o.created_at });
 const norm = r => ({ ...r, t: Date.parse(r.created_at) || Date.now(), _b: null });
 
@@ -176,8 +178,8 @@ export class Store {
     this.tch = tch;
 
     const onOnline = () => { this.resync(); this.flush(); };
-    const onVis = () => { if (document.visibilityState === 'visible') { this.resync(); this.flush(); } };
-    const onHide = () => this.persist();
+    const onVis = () => { if (document.visibilityState === 'visible') { this.resync(); this.flush(); } else this.flushNow(); };
+    const onHide = () => { this.persist(); this.flushNow(); };
     addEventListener('online', onOnline); addEventListener('offline', () => this.setConn(false));
     document.addEventListener('visibilitychange', onVis); addEventListener('pagehide', onHide);
     this.cleanup = () => { removeEventListener('online', onOnline); document.removeEventListener('visibilitychange', onVis); removeEventListener('pagehide', onHide); };
@@ -266,7 +268,17 @@ export class Store {
   }
 
   markDirty(id, kind) { this.dirty.set(id, kind); this.afterLocalChange(); }
-  afterLocalChange() { this.setSync(this.online ? 'saving' : 'offline'); this.persistSoon(); this.flush(); }
+  // What is written shows at once and is kept safe on this device straight away; it goes to the internet about 3 seconds after the last change
+  // (never later than 8 seconds after the first unsaved one, so long writing is still saved along the way).
+  afterLocalChange() { this.setSync(this.online ? 'saving' : 'offline'); this.persistSoon(); this.saveSoon(); }
+  saveSoon() {
+    clearTimeout(this.saveT);
+    if (!this.firstDirtyAt) this.firstDirtyAt = Date.now();
+    const wait = Math.max(0, Math.min(SAVE_AFTER, this.firstDirtyAt + SAVE_MAX - Date.now()));
+    this.saveT = setTimeout(() => { this.firstDirtyAt = 0; this.flush(); }, wait);
+  }
+  // save right now (submitting, leaving, the page going to the background)
+  flushNow() { clearTimeout(this.saveT); this.firstDirtyAt = 0; return this.flush(); }
 
   setSync(s) { if (this.sync !== s) { this.sync = s; this.emit('sync', s); } }
 
@@ -347,6 +359,9 @@ export class Store {
   isDenied(e) { return e && (e.code === '42501' || e.status === 403 || /row-level security/i.test(e.message || '')); }
 
   close() {
+    clearTimeout(this.saveT);
+    // leaving the board: send what is still waiting (it is also kept on this device, so nothing is lost if this does not finish)
+    if (this.dirty.size && !this.closed && this.online) (async () => { try { for (let i = 0; i < 8 && this.dirty.size; i++) await this.flushOnce(); } catch (e) { /* kept on this device */ } })();
     this.closed = true; this.persist();
     for (const t of this.timers) clearInterval(t);
     if (this.cleanup) this.cleanup();
