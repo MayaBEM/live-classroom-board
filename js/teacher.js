@@ -8,6 +8,7 @@ import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
 import { createBoard, deleteBoard, deleteClass, sourceForm, renameBoardDialog } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
+import { importLibraryDialog } from './library.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
 import { IdeaBoard, STUDENT_INK, TEACHER_INK } from './idea.js';
 
@@ -492,7 +493,7 @@ export class TeacherApp {
       if (error) return toast(friendlyError(error), 'bad'); await this.refresh();
     };
     return h('section', { class: 'sheet-panel' },
-      h('header', null, h('h2', null, 'App shelf'), h('button', { class: 'btn primary', onclick: () => this.addApp({}) }, iconEl('plus', 18), 'Add app to shelf')),
+      h('header', null, h('h2', null, 'App shelf'), h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, h('button', { class: 'btn', onclick: () => importLibraryDialog({ sb: this.sb, existing: this.apps, onSaved: () => this.refresh() }) }, 'Bring from my library'), h('button', { class: 'btn primary', onclick: () => this.addApp({}) }, iconEl('plus', 18), 'Add app to shelf'))),
       h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Step 1: add each of your web apps here once. Step 2: press "Give to students" on an app, or open a student and press "Add from my shelf". It shows on their page as a tile they tap to play.'),
       this.apps.length ? h('div', { class: 'app-grid' }, this.apps.map((a, i) => { const who = names(a.id);
         return h('div', { class: 'app-tile ' + TILE5[i % 5] },

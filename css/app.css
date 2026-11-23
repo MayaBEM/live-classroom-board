@@ -798,3 +798,13 @@ input, textarea, select { font-size: max(16px, 1em); }
 .lib-sub { font-size: 12px; color: var(--ink-2); }
 .lib-sub.warn { color: var(--warn); font-weight: 600; }
 .lib-on { font-size: 12px; color: var(--ok); font-weight: 600; flex: none; }
+
+/* ---- bring many apps from the library ---- */
+.lib-imp-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 8px; margin-top: 8px; max-height: min(52vh, 460px); overflow: auto; padding: 2px; touch-action: pan-y; overscroll-behavior: contain; }
+.lib-imp { background: #fff; border: 1px solid #CDC7B8; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+.lib-imp[hidden] { display: none; }
+.lib-imp.done { opacity: .6; }
+.lib-imp-top { display: flex; align-items: center; gap: 10px; cursor: pointer; min-height: var(--tap); }
+.lib-imp-top input { width: 22px; height: 22px; flex: none; }
+.lib-thumb.sm { width: 48px; height: 48px; }
+.lib-link { font-size: 16px; }

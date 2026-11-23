@@ -16,6 +16,10 @@ const SLUGS = [
   [/describing words fish|fish designer/i, 'fish-designer-aquarium'],
   [/ugly sweater/i, 'ugly-sweater-designer'],
   [/angle lab/i, 'angle-lab'],
+  [/^fractions mastery/i, 'fractions-mastery'],
+  [/^algebra toolkit/i, 'algebra-toolkit'],
+  [/^math champions/i, 'math-champions'],
+  [/^fraction tiles lab/i, 'fraction-tiles-lab'],
 ];
 
 const j = await (await fetch(SITE + '/api/materials')).json();

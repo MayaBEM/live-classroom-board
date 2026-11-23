@@ -36,7 +36,7 @@ export const cleanUrl = raw => {
   if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
   return u;
 };
-const validUrl = u => /^https?:\/\/[^\s]+$/i.test(u) && u.length <= 500 && /^https?:\/\/[^\s/]+\.[^\s/]+/i.test(u);
+export const validUrl = u => /^https?:\/\/[^\s]+$/i.test(u) && u.length <= 500 && /^https?:\/\/[^\s/]+\.[^\s/]+/i.test(u);
 
 // make a new app or change one; tick the students who get it
 // app: existing row or null; have: Set of student ids who have it now; preselect: student ids ticked for a new app
