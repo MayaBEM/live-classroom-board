@@ -53,8 +53,8 @@ function summaryCanvas(board, st) {
 export async function buildPdf({ sb, store, students, onlyWritten, onProgress, isCancelled }) {
   const { PDFDocument } = await loadPdfLib();
   const pdf = await PDFDocument.create();
-  const pages = store.pages, W = 1240, A4w = 595;
-  const total = Math.max(1, students.length * pages.length);
+  const W = 1240, A4w = 595;
+  const total = Math.max(1, students.reduce((n, st) => n + store.pagesFor(st.id).length, 0));
   let done = 0;
   const addCanvas = async cv => {
     const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.88));
@@ -63,6 +63,7 @@ export async function buildPdf({ sb, store, students, onlyWritten, onProgress, i
     pg.drawImage(img, { x: 0, y: 0, width: A4w, height: ph });
   };
   for (const st of students) {
+    const pages = store.pagesFor(st.id);       // the shared pages, and any page this student added
     for (let i = 0; i < pages.length; i++) {
       if (isCancelled()) throw new Error('Cancelled');
       const pg = pages[i], objs = store.pageObjects(pg.id, st.id).filter(o => !o.deleted);

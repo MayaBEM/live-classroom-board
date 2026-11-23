@@ -92,6 +92,16 @@ export class Store {
   invalidate(pid) { for (const k of [...this.cache.keys()]) if (k.startsWith(pid + '|')) this.cache.delete(k); }
 
   // objects of one page. In an assignment, `scope` is the student whose private copy we mean (null = shared live board)
+  // Pages: the teacher's pages (owner_id empty) and the extra pages a student added to their own copy (owner_id = that student's copy).
+  // A student's database view already holds only their own; the teacher sees the shared pages, plus the ones of the copy being looked at.
+  get pages() {
+    const rows = this.allPages || [];
+    if (this.role === 'student' || !rows.some(p => p.owner_id)) return rows;
+    return rows.filter(p => !p.owner_id || p.owner_id === this.scopeId);
+  }
+  set pages(v) { this.allPages = v; }
+  pagesFor(participantId) { return (this.allPages || []).filter(p => !p.owner_id || p.owner_id === participantId); }
+
   pageObjects(pid, scope = this.scopeId) {
     const key = pid + '|' + (scope || '');
     let a = this.cache.get(key);
@@ -116,7 +126,7 @@ export class Store {
       if (!b.data) { this.emit('removed'); return; }
       const bc = JSON.stringify(b.data) !== JSON.stringify(this.board);
       this.board = b.data;
-      if (JSON.stringify(p.data) !== JSON.stringify(this.pages)) { this.pages = p.data; this.emit('pages'); }
+      if (JSON.stringify(p.data) !== JSON.stringify(this.allPages)) { this.pages = p.data; this.emit('pages'); }
       if (bc) this.emit('board');
       if (full || !this.cursor) { await this.loadPeople(); await this.fetchObjects(null, true); }
       else if (this.role === 'teacher' && this.mode === 'assignment') await this.loadPeople();

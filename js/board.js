@@ -4,7 +4,8 @@ import { pencil, TwoFingerTap } from './pencil.js';
 import { pictureFromFile } from './picture.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER, DECOR } from './render.js';
+import { STICKERS, STICKER_GROUPS, TAPES, drawSticker, drawTape } from './stickers.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
 import { TimerController } from './timer.js';
@@ -13,15 +14,18 @@ import { exportDialog } from './export.js';
 import { shareDialog } from './share.js';
 import { CONFIG } from '../config.js';
 import { friendlyError } from './db.js';
-import { openAddPages, renameBoardDialog } from './pages.js';
+import { openAddPages, renameBoardDialog, PAGE_H } from './pages.js';
 
 const TOOLS = [
   ['move', 'Move', 'move'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
   ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow'], ['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'],
-  ['image', 'Picture', 'image'], ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
+  ['image', 'Picture', 'image'], ['sticker', 'Stickers', 'sticker'], ['tape', 'Washi tape', 'tape'], ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
 ];
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const SHAPES = new Set(['line', 'arrow', 'rect', 'ellipse']);
+const STICKER_SIZES = [90, 150, 230], TAPE_W = [30, 44, 64];   // in page units (a page is 1000 wide)
+const stickerThumb = k => { const c = document.createElement('canvas'); c.width = c.height = 96; c.style.width = c.style.height = '46px'; drawSticker(c.getContext('2d'), k, 10, 10, 76, 76); return c; };
+const tapeThumb = k => { const c = document.createElement('canvas'); c.width = 144; c.height = 56; c.style.width = '72px'; c.style.height = '28px'; const g = c.getContext('2d'); g.scale(2, 2); drawTape(g, { k, x0: 6, y0: 14, x1: 66, y1: 14, w: 20 }); return c; };
 const ERASER_PX = [8, 14, 26];   // eraser radius on the screen (thin, medium, thick)
 // distance from a point to a straight piece a-b
 function distPtSeg(px, py, a, b) {
@@ -51,7 +55,7 @@ export class BoardView {
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
     this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent();
-    this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -388,7 +392,7 @@ export class BoardView {
     this.commitEditor();
     const was = this.tool;
     this.tool = t;
-    if (t !== 'image') this.imgSel = null;
+    if (t !== 'image' && t !== 'sticker') this.imgSel = null;
     this.stage.classList.toggle('move', t === 'move'); this.stage.classList.toggle('erase', t === 'eraser');
     this.renderRail(); this.renderOpts();
     if (t !== 'laser') this.laserPts = [];
@@ -428,6 +432,14 @@ export class BoardView {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser type' }, [['part', 'Rub out a part'], ['whole', 'Remove a whole line']].map(([k, label]) =>
         h('button', { class: 'btn sm' + (this.eraseMode === k ? ' on' : ''), 'aria-pressed': String(this.eraseMode === k), onclick: () => { this.eraseMode = k; try { localStorage.setItem('bem-erase-mode', k); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser size' }, sizes(i => { this.eraseSizeIdx = i; this.renderOpts(); }, this.eraseSizeIdx)));
+    } else if (t === 'sticker') {
+      const grp = this.stickerGroup;
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Kind of sticker' }, STICKER_GROUPS.map(([k, label]) => h('button', { class: 'btn sm' + (grp === k ? ' on' : ''), 'aria-pressed': String(grp === k), onclick: () => { this.stickerGroup = k; this.renderOpts(); } }, label))));
+      kids.push(h('div', { class: 'sticker-grid', role: 'group', 'aria-label': 'Stickers' }, STICKERS.filter(s => s.group === grp).map(s => h('button', { class: 'stk', 'aria-label': s.name, title: s.name, 'aria-pressed': String(this.stickerKind === s.k), onclick: () => { this.stickerKind = s.k; this.renderOpts(); } }, stickerThumb(s.k)))));
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })), h('span', { class: 'note' }, 'Tap the page to put it there. Tap a sticker to move it or make it bigger.'));
+    } else if (t === 'tape') {
+      kids.push(h('div', { class: 'grp tapes', role: 'group', 'aria-label': 'Tape' }, TAPES.map(([k, label]) => h('button', { class: 'tapebtn', 'aria-label': label, title: label, 'aria-pressed': String(this.tapeKind === k), onclick: () => { this.tapeKind = k; this.renderOpts(); } }, tapeThumb(k)))));
+      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Width' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })), h('span', { class: 'note' }, 'Press and drag: the tape gets longer as you drag. A tap makes a short piece.'));
     } else if (t === 'image') {
       kids.push(h('button', { class: 'btn primary sm', onclick: () => this.pickPicture() }, iconEl('image', 18), 'Add a picture'),
         h('span', { class: 'note' }, 'Drag a picture to move it. Drag its corner to make it bigger or smaller. The eraser removes it.'));
@@ -486,11 +498,23 @@ export class BoardView {
   positionImgBox() {
     const b = this.imgBox; if (!b) return;
     const o = this.imgSel && this.store.objs.get(this.imgSel);
-    if (!o || o.deleted || o.page_id !== this.pageId || this.tool !== 'image') { b.hidden = true; return; }
+    if (!o || o.deleted || o.page_id !== this.pageId || (this.tool !== 'image' && this.tool !== 'sticker')) { b.hidden = true; return; }
     const d = o.data, s = this.view.s || 1;
     b.hidden = false;
     Object.assign(b.style, { left: d.x + 'px', top: d.y + 'px', width: d.w + 'px', height: d.h + 'px', borderWidth: 2 / s + 'px' });
     const hd = b.firstChild; hd.style.width = hd.style.height = 22 / s + 'px'; hd.style.right = hd.style.bottom = -11 / s + 'px'; hd.style.borderWidth = 2 / s + 'px';
+  }
+
+  // a sticker where the page was tapped
+  placeSticker(p) {
+    if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
+    let have = 0; for (const o of this.store.objs.values()) if (o.type === 'sticker' && !o.deleted && this.store.canEdit(o)) have++;
+    if (have >= 120) return toast('That is a lot of stickers! Erase some first.', 'bad');
+    const s = STICKER_SIZES[this.sizeIdx], x = Math.round(Math.min(Math.max(0, p.x - s / 2), 1000 - s)), y = Math.round(Math.max(0, Math.min(p.y - s / 2, (this.page ? this.page.h : 1400) - s)));
+    const o = this.store.addObject('sticker', this.pageId, { k: this.stickerKind, x, y, w: s, h: s });
+    this.pushUndo({ t: 'create', id: o.id });
+    const ctx = this.cUnder.getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
+    this.thumbDirty(this.pageId); this.selectImg(o.id);
   }
 
   placeStamp(p) {
@@ -518,9 +542,11 @@ export class BoardView {
     this.updatePager();
     this.store.track({ name: this.store.name, role: this.role, page: this.store.pages.indexOf(pg) + 1 });
     if (this.copy) this.store.setCurPage(this.store.pages.indexOf(pg) + 1);
-    this.markThumbCurrent();
+    this.markThumbCurrent(); this.updateMyPageButtons();
     this.broadcastView(true);
   }
+  // the Delete button of the pages list only shows on a page the student added themselves
+  updateMyPageButtons() { if (!this.btnDelMine) return; const cur = this.store.pages.find(p => p.id === this.pageId); this.btnDelMine.hidden = !(cur && cur.owner_id); }
 
   // is the whole width of the page on the screen? (then a sideways swipe means "turn the page", not "move the page")
   fitsAcross() { const { w } = this.stageSize(); return 1000 * this.view.s <= w - 24 + 1; }
@@ -674,7 +700,7 @@ export class BoardView {
     for (const [c, x] of [[this.cInk, ctx], [this.cUnder, uctx]]) { x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.setTransform(q, 0, 0, q, 0, 0); }
     const fp = this.focusPerson, list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && o.id !== this.hiddenId);
     const opt = o => (fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
-    for (const o of list) if (o.type === 'image') drawObject(uctx, o, opt(o));             // pictures at the bottom,
+    for (const o of list) if (DECOR(o)) drawObject(uctx, o, opt(o));                       // pictures, stickers and tape at the bottom,
     for (const o of list) if (o.type === 'highlighter') drawObject(uctx, o, opt(o));       // then highlighting,
     for (const o of list) if (!UNDER(o)) drawObject(ctx, o, opt(o));                        // and the writing on top
     this.positionImgBox();
@@ -876,7 +902,7 @@ export class BoardView {
     if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); this.tap.down(this.pointers); return; }   // two fingers never write: they zoom, move, or (a quick tap) undo
     this.suppress = false;
     // "Pencil only": a finger only moves the page
-    if (e.pointerType === 'touch' && pencil.only && this.tool !== 'image') { this.startPan(e); return; }   // (a finger may still move a picture: that is not writing)
+    if (e.pointerType === 'touch' && pencil.only && !['image', 'sticker', 'tape'].includes(this.tool)) { this.startPan(e); return; }   // (a finger may still move a picture or put on a sticker or tape: that is not writing)
     const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (!this.toolAllowed(this.tool));
     if (panning) { this.startPan(e); return; }
     const p = this.toPage(e); this.downAt = { x: e.clientX, y: e.clientY, p, moved: false };
@@ -886,15 +912,19 @@ export class BoardView {
       const data = { c: t === 'pen' ? this.color : this.hlColor, s: (t === 'pen' ? PEN_SIZES : HL_SIZES)[this.sizeIdx], pr: pr ? 1 : 0, p: pr ? [p.x, p.y, e.pressure || 0.5] : [p.x, p.y] };
       this.clearStroke(); this.cur = { id: uuid(), type: t, page_id: this.pageId, data, deleted: false }; this.sentTo = 0; this.straight = false; this.strokeStartedAt = performance.now();
       this.sendCur(); this.requestLive();
+    } else if (t === 'tape') {
+      this.cur = { id: uuid(), type: 'tape', page_id: this.pageId, deleted: false, data: { k: this.tapeKind, w: TAPE_W[this.sizeIdx], x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
+      this.requestLive();
     } else if (SHAPES.has(t)) {
       this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
       this.requestLive();
-    } else if (t === 'image') {
+    } else if (t === 'image' || t === 'sticker') {
       const sel = this.imgSel && this.store.objs.get(this.imgSel), k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width;   // page units per screen pixel
       let target = null, mode = 'move';
       if (sel && !sel.deleted && sel.page_id === this.pageId && this.store.canEdit(sel)) { const b = bounds(sel); if (Math.hypot(p.x - b.x1, p.y - b.y1) <= 26 * k) { target = sel; mode = 'resize'; } }
-      if (!target) { const list = this.store.pageObjects(this.pageId); for (let i = list.length - 1; i >= 0; i--) { const o = list[i]; if (o.type === 'image' && !o.deleted && this.store.canEdit(o) && hit(o, p.x, p.y, 0)) { target = o; break; } } }
+      if (!target) { const list = this.store.pageObjects(this.pageId); for (let i = list.length - 1; i >= 0; i--) { const o = list[i]; if ((o.type === 'image' || o.type === 'sticker') && !o.deleted && this.store.canEdit(o) && hit(o, p.x, p.y, 0)) { target = o; break; } } }
       if (target) { this.selectImg(target.id); this.imgDrag = { id: target.id, mode, p0: p, before: target.data, moved: false }; }
+      else if (t === 'sticker') { this.selectImg(null); }                      // empty place: a tap puts the sticker there (see onUp)
       else { this.selectImg(null); this.downAt = null; this.startPan(e); }
     } else if (t === 'eraser') {
       this.eraseIds = []; this.eraseAdd = []; this.eraseLast = p; this.eraseSeg(p, p); this.renderInk();
@@ -932,8 +962,8 @@ export class BoardView {
       const pe = e.getPredictedEvents ? e.getPredictedEvents() : [];
       this.pred = pe.length ? pe.slice(0, 3).map(ev => this.toPage(ev)) : (e.pointerType === 'mouse' ? null : this.leadPoint(d, stride));   // Safari gives no predicted points: look a little ahead ourselves
       this.sendCurT(); this.requestLive();
-    } else if (this.cur && SHAPES.has(t)) {
-      const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;
+    } else if (this.cur && (SHAPES.has(t) || t === 'tape')) {
+      const p = this.toPage(e), d = this.cur.data; d.x1 = p.x; d.y1 = p.y;      // (washi tape gets longer as the finger is dragged)
       if (e.shiftKey && (t === 'rect' || t === 'ellipse')) { const m = Math.max(Math.abs(p.x - d.x0), Math.abs(p.y - d.y0)); d.x1 = d.x0 + Math.sign(p.x - d.x0 || 1) * m; d.y1 = d.y0 + Math.sign(p.y - d.y0 || 1) * m; }
       this.sendShapeT(); this.requestLive();
     } else if (t === 'eraser') this.eraseMove(e);
@@ -980,9 +1010,10 @@ export class BoardView {
       const d = this.cur.data, stride = d.pr ? 3 : 2;
       d.p = simplify(d.p, stride, 0.3).map(v => Math.round(v * 20) / 20);
       this.finishCur();
-    } else if (this.cur && SHAPES.has(t)) {
+    } else if (this.cur && (SHAPES.has(t) || t === 'tape')) {
       const d = this.cur.data;
-      if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 3) { this.cur = null; this.requestLive(); }
+      if (t === 'tape' && Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 12) { const cx = d.x0; d.x0 = cx - 90; d.x1 = cx + 90; d.y1 = d.y0; for (const k of ['x0', 'y0', 'x1', 'y1']) d[k] = Math.round(d[k] * 10) / 10; this.finishCur(); }   // a tap puts down a short piece
+      else if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 3) { this.cur = null; this.requestLive(); }
       else { for (const k of ['x0', 'y0', 'x1', 'y1']) d[k] = Math.round(d[k] * 10) / 10; this.finishCur(); }
     } else if (t === 'eraser') {
       this.finishErase();
@@ -990,6 +1021,7 @@ export class BoardView {
       if (this.skipTextOpen) { this.skipTextOpen = false; return; }
       this.openTextAt(da.p);
     } else if (t === 'stamp' && da && !da.moved) this.placeStamp(da.p);
+    else if (t === 'sticker' && da && !da.moved) this.placeSticker(da.p);
     else if (t === 'laser' && this.isTeacher && e.pointerType !== 'mouse') this.store.sendLaser({ page: this.pageId, off: true });
     this.skipTextOpen = false;
   }
@@ -1257,6 +1289,37 @@ export class BoardView {
     if (this.panel === 'pages') this.renderPagesPanel(); else this.renderPeoplePanel();
   }
 
+  // ---- a student's own extra pages (assignment copies)
+  addMyPageDialog() {
+    if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
+    let orient = 'landscape';
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Page shape' });
+    const draw = () => seg.replaceChildren(...[['landscape', 'Wide'], ['portrait', 'Tall']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(orient === k), onclick: () => { orient = k; draw(); } }, label)));
+    draw();
+    const add = async kind => { m.close(); await this.addMyPage(kind, orient); };
+    const kinds = [['blank', 'Blank'], ['lined', 'Lines'], ['grid', 'Squares']];
+    const m = modal({ title: 'Add a page', body: h('div', null, h('p', { class: 'hint', style: { marginBottom: '10px' } }, 'A new page for your own writing and drawing. Your teacher can see it.'), seg,
+      h('div', { class: 'page-kinds' }, kinds.map(([k, label]) => h('button', { class: 'btn big', onclick: () => add(k) }, label)))), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel')] });
+  }
+  async addMyPage(kind, orient) {
+    const me = this.store.me; if (!me || !me.id) return toast('Could not add the page. Try again.', 'bad');
+    const own = this.store.pages.filter(p => p.owner_id === me.id).length;
+    if (own >= 20) return toast('You can add up to 20 pages.', 'bad');
+    const { data, error } = await this.sb.from('pages').insert({ board_id: this.store.boardId, idx: 1000 + own, kind, w: 1000, h: PAGE_H[orient] || PAGE_H.landscape, owner_id: me.id }).select().single();
+    if (error) return toast(friendlyError(error), 'bad');
+    this.store.pages = [...this.store.allPages, data].sort((a, b) => a.idx - b.idx);
+    this.store.emit('pages'); this.setPage(data.id, { user: true });
+    toast('Page added.', 'ok');
+  }
+  async deleteMyPage(pg) {
+    const ok = await confirmDialog({ title: 'Delete this page?', text: 'The page and everything on it will be deleted. This cannot be undone.', confirmLabel: 'Delete page', danger: true });
+    if (!ok) return;
+    const { error } = await this.sb.from('pages').delete().eq('id', pg.id);
+    if (error) return toast(friendlyError(error), 'bad');
+    this.store.pages = this.store.allPages.filter(p => p.id !== pg.id); this.store.emit('pages');
+    toast('Page deleted.', 'ok');
+  }
+
   renderPagesPanel() {
     const ps = this.store.pages;
     const list = ps.map((p, i) => {
@@ -1266,6 +1329,11 @@ export class BoardView {
       return b;
     });
     const foot = [];
+    if (this.copy && !this.isTeacher) {       // a student can add pages of their own to their copy
+      foot.push(h('button', { class: 'btn sm primary', onclick: () => this.addMyPageDialog() }, iconEl('plus', 18), 'Add a page'));
+      this.btnDelMine = h('button', { class: 'btn sm danger', onclick: () => { const cur = this.store.pages.find(p => p.id === this.pageId); if (cur && cur.owner_id) this.deleteMyPage(cur); } }, iconEl('trash', 18), 'Delete this page');
+      foot.push(this.btnDelMine); this.updateMyPageButtons();
+    }
     if (this.isTeacher) {
       foot.push(h('button', { class: 'btn sm primary', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), 'Add pages'));
       foot.push(h('button', { class: 'btn sm danger', disabled: ps.length < 1, onclick: () => this.deleteCurrentPage() }, iconEl('trash', 18), 'Delete this page'));

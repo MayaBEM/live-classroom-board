@@ -116,6 +116,8 @@ function drawStamp(ctx, d) {
   ctx.restore();
 }
 
+import { drawSticker, drawTape } from './stickers.js';
+
 // ---------------------------------------------------------------- pictures (small JPEGs kept inside the object)
 const IMGS = new Map(), imgWatchers = new Set();
 const validSrc = s => typeof s === 'string' && s.length < 320000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(s);   // only our own small pictures: never an address on the internet
@@ -197,16 +199,19 @@ export function drawObject(ctx, o, opts = {}) {
       if (e.ok) ctx.drawImage(e.img, d.x, d.y, d.w, d.h); else { ctx.fillStyle = '#E8EDF2'; ctx.fillRect(d.x, d.y, d.w, d.h); }
       break;
     }
+    case 'sticker': drawSticker(ctx, d.k, d.x, d.y, d.w, d.h); break;
+    case 'tape': drawTape(ctx, d); break;
     default: break;
   }
   ctx.restore();
 }
 
-// Pictures and highlighting sit UNDER the writing: pictures first, then highlighters, then everything else (pen, text, shapes, stamps)
-export const UNDER = o => o.type === 'image' || o.type === 'highlighter';
+// Pictures, stickers, tape and highlighting sit UNDER the writing: pictures, stickers and tape first (in the order they were put down), then highlighters, then everything else (pen, text, shapes, stamps)
+export const DECOR = o => o.type === 'image' || o.type === 'sticker' || o.type === 'tape';
+export const UNDER = o => DECOR(o) || o.type === 'highlighter';
 export function drawObjects(ctx, objs, skipId) {
   const list = objs.filter(o => !o.deleted && o.id !== skipId);
-  for (const o of list) if (o.type === 'image') drawObject(ctx, o);
+  for (const o of list) if (DECOR(o)) drawObject(ctx, o);
   for (const o of list) if (o.type === 'highlighter') drawObject(ctx, o);
   for (const o of list) if (!UNDER(o)) drawObject(ctx, o);
 }
@@ -218,8 +223,10 @@ export function bounds(o) {
   if (o.type === 'pen' || o.type === 'highlighter') {
     const stride = d.pr ? 3 : 2; x0 = y0 = Infinity; x1 = y1 = -Infinity;
     for (let i = 0; i < d.p.length; i += stride) { x0 = Math.min(x0, d.p[i]); x1 = Math.max(x1, d.p[i]); y0 = Math.min(y0, d.p[i + 1]); y1 = Math.max(y1, d.p[i + 1]); }
-  } else if (o.type === 'image') {
+  } else if (o.type === 'image' || o.type === 'sticker') {
     x0 = d.x; y0 = d.y; x1 = d.x + d.w; y1 = d.y + d.h;
+  } else if (o.type === 'tape') {
+    const t = (d.w || 44) / 2; x0 = Math.min(d.x0, d.x1) - t; x1 = Math.max(d.x0, d.x1) + t; y0 = Math.min(d.y0, d.y1) - t; y1 = Math.max(d.y0, d.y1) + t;
   } else if (o.type === 'stamp') {
     const b = stampBox(d); x0 = d.x - b.w / 2; x1 = d.x + b.w / 2; y0 = d.y - b.h / 2; y1 = d.y + b.h / 2;
   } else if (o.type === 'text') {
@@ -258,7 +265,8 @@ export function hit(o, x, y, r) {
       const tol = w / Math.min(rx, ry);
       return Math.abs(k - 1) <= tol;
     }
-    case 'text': case 'stamp': case 'image': return true;
+    case 'text': case 'stamp': case 'image': case 'sticker': return true;
+    case 'tape': return distSeg(x, y, d.x0, d.y0, d.x1, d.y1) <= (d.w || 44) / 2 + r;
     default: return false;
   }
 }
