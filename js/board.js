@@ -4,7 +4,7 @@ import { pencil, TwoFingerTap } from './pencil.js';
 import { pictureFromFile } from './picture.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER, DECOR } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STAMP_COLORS, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER, DECOR } from './render.js';
 import { STICKERS, STICKER_GROUPS, TAPES, drawSticker, drawTape } from './stickers.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
@@ -48,7 +48,7 @@ export class BoardView {
     this.copy = !this.isTeacher && this.assign;         // a student's own copy
     this.renderer = renderer || new PageRenderer(sb);
     this.pageMm = {}; this.instr = new Instruments(this, state => this.onInstrChange(state));
-    this.stampKind = 'check'; this.lastFeedbackToast = 0;
+    this.stampKind = 'check'; this.stampColors = {}; this.lastFeedbackToast = 0;
     this.tool = 'pen'; this.color = this.review ? '#D62F2F' : PEN_COLORS[0][1]; this.hlColor = HL_COLORS[0][1]; this.sizeIdx = 1;
     this.pageId = null; this.view = { s: 1, tx: 0, ty: 0 }; this.q = 1; this.autoFit = true;
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
@@ -118,15 +118,16 @@ export class BoardView {
     this.elTop = h('header', { class: 'b-top' + (this.review ? ' wide-wrap' : '') }, this.tbLeft, this.elRail, this.tbRight);
     this.elOpts = h('div', { class: 'b-pop', hidden: true });
     this.sheet = h('div', { class: 'sheet' });
-    this.cBase = h('canvas'); this.cUnder = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
-    [this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive].forEach((c, i) => { c.style.zIndex = String([0, 1, 3, 4, 5][i]); });   // paper, then pictures+highlighting, then the writing, then the stroke being written
+    this.cBase = h('canvas'); this.cUnder = h('canvas'); this.cHl = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
+    [this.cBase, this.cUnder, this.cHl, this.cInk, this.cStroke, this.cLive].forEach((c, i) => { c.style.zIndex = String([0, 1, 2, 3, 4, 5][i]); });   // paper, then pictures, then highlighting, then the writing, then the stroke being written
+    this.cHl.style.mixBlendMode = 'multiply';      // highlighting only tints the paper: the printed words under it stay black and sharp
     this.overlay = h('div', { class: 'overlay' });
     this.imgBox = h('div', { class: 'img-sel', hidden: true }, h('i', { class: 'img-handle' }));
     this.overlay.append(this.imgBox);
     this.fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
     this.fileInput.addEventListener('change', () => { const f = this.fileInput.files && this.fileInput.files[0]; this.fileInput.value = ''; if (f) this.addPicture(f); });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
-    this.sheet.append(this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
+    this.sheet.append(this.cBase, this.cUnder, this.cHl, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
     this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
@@ -381,7 +382,7 @@ export class BoardView {
   get locked() { return !this.isTeacher && !!this.lockReason(); }
   toolAllowed(t) {
     if (t === 'laser') return this.isTeacher && !this.assign;
-    if (t === 'stamp') return this.review;
+    if (t === 'stamp') return this.isTeacher;
     return t === 'move' || !this.locked;
   }
 
@@ -391,7 +392,7 @@ export class BoardView {
     this.btnRedo = h('button', { class: 'tbtn', title: 'Redo', 'aria-label': 'Redo', onclick: () => this.doRedo() }, iconEl('redo', 22));
     items.push(this.btnUndo, this.btnRedo, h('span', { class: 'tsep' }));
     for (const [id, label, ic] of TOOLS) {
-      if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.review)) continue;
+      if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.isTeacher)) continue;
       items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(this.tool === id), disabled: !this.toolAllowed(id), 'data-tool': id, title: label, 'aria-label': label, onclick: () => { if (id === this.tool && (id === 'sticker' || id === 'tape' || id === 'image')) { this.popOpen = !this.popOpen; this.renderOpts(); } else this.setTool(id); } }, iconEl(ic, 22)));
       if (id === 'move' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
     }
@@ -428,6 +429,8 @@ export class BoardView {
     if (t === 'stamp') {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Stamp' }, STAMPS.map(([k, name]) =>
         h('button', { class: 'stampbtn', 'aria-label': name, title: name, 'aria-pressed': String(this.stampKind === k), onclick: () => { this.stampKind = k; this.renderOpts(); } }, this.stampPreview(k)))));
+      if (this.stampKind !== 'star') kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Stamp colour' }, [['Green', '#1F8A4C'], ['Red', '#D62F2F']].map(([name, hex]) =>
+        h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(this.stampCol(this.stampKind) === hex), onclick: () => { this.stampColors[this.stampKind] = hex; this.renderOpts(); } }))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })));
       kids.push(h('span', { class: 'note' }, 'Tap the page to place it'));
     } else if (colored) {
@@ -494,10 +497,11 @@ export class BoardView {
 
   updatePager() { if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText(); }
 
+  stampCol(k) { return this.stampColors[k] || STAMP_COLORS[k] || null; }
   stampPreview(k) {
     const c = document.createElement('canvas'); c.width = 96; c.height = 56; c.style.width = '48px'; c.style.height = '28px';
     const ctx = c.getContext('2d'); ctx.scale(2, 2);
-    drawObject(ctx, { type: 'stamp', data: { k, x: 24, y: 14, s: k === 'good' || k === 'try' ? 17 : 24 } });
+    drawObject(ctx, { type: 'stamp', data: { k, c: this.stampCol(k), x: 24, y: 14, s: k === 'good' || k === 'try' ? 17 : 24 } });
     return c;
   }
 
@@ -543,8 +547,8 @@ export class BoardView {
   }
 
   placeStamp(p) {
-    if (!this.review) return;
-    const o = this.store.addObject('stamp', this.pageId, { k: this.stampKind, x: Math.round(p.x), y: Math.round(p.y), s: STAMP_SIZES[this.sizeIdx] });
+    if (!this.isTeacher) return;
+    const o = this.store.addObject('stamp', this.pageId, { k: this.stampKind, c: this.stampCol(this.stampKind), x: Math.round(p.x), y: Math.round(p.y), s: STAMP_SIZES[this.sizeIdx] });
     this.pushUndo({ t: 'create', id: o.id });
     const ctx = this.cInk.getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
     this.thumbDirty(this.pageId);
@@ -671,7 +675,7 @@ export class BoardView {
   sizeCanvases() {
     const pg = this.page; if (!pg) return;
     const W = Math.round(1000 * this.q), H = Math.round(pg.h * this.q);
-    for (const c of [this.cBase, this.cUnder, this.cInk, this.cStroke, this.cLive]) { c.width = W; c.height = H; }
+    for (const c of [this.cBase, this.cUnder, this.cHl, this.cInk, this.cStroke, this.cLive]) { c.width = W; c.height = H; }
     this.strokeIdx = 1;
   }
 
@@ -755,12 +759,12 @@ export class BoardView {
 
   renderInk() {
     if (!this.pageId) return;
-    const ctx = this.cInk.getContext('2d'), uctx = this.cUnder.getContext('2d'), q = this.q;
-    for (const [c, x] of [[this.cInk, ctx], [this.cUnder, uctx]]) { x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.setTransform(q, 0, 0, q, 0, 0); }
+    const ctx = this.cInk.getContext('2d'), uctx = this.cUnder.getContext('2d'), hctx = this.cHl.getContext('2d'), q = this.q;
+    for (const [c, x] of [[this.cInk, ctx], [this.cUnder, uctx], [this.cHl, hctx]]) { x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, c.width, c.height); x.setTransform(q, 0, 0, q, 0, 0); }
     const fp = this.focusPerson, list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && o.id !== this.hiddenId);
     const opt = o => (fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
     for (const o of list) if (DECOR(o)) drawObject(uctx, o, opt(o));                       // pictures, stickers and tape at the bottom,
-    for (const o of list) if (o.type === 'highlighter') drawObject(uctx, o, opt(o));       // then highlighting,
+    for (const o of list) if (o.type === 'highlighter') drawObject(hctx, o, opt(o));       // then highlighting (its own layer, multiplied onto the paper),
     for (const o of list) if (!UNDER(o)) drawObject(ctx, o, opt(o));                        // and the writing on top
     this.positionImgBox();
   }
@@ -781,7 +785,7 @@ export class BoardView {
   strokeCtx() { if (!this._sctx) { try { this._sctx = this.cStroke.getContext('2d', { desynchronized: true }); } catch (e) { this._sctx = this.cStroke.getContext('2d'); } } return this._sctx; }
   clearStroke() {
     const sc = this.strokeCtx(); sc.setTransform(1, 0, 0, 1, 0, 0); sc.clearRect(0, 0, this.cStroke.width, this.cStroke.height);
-    this.strokeIdx = 1; this.strokeDirty = false; this.pred = null; this.cStroke.style.opacity = ''; this.cStroke.style.zIndex = '4';
+    this.strokeIdx = 1; this.strokeDirty = false; this.pred = null; this.cStroke.style.opacity = ''; this.cStroke.style.zIndex = '4'; this.cStroke.style.mixBlendMode = '';
   }
 
   renderLive() {
@@ -803,8 +807,8 @@ export class BoardView {
       if (this.cur.type === 'pen' || this.cur.type === 'highlighter') {
         // the finished part goes onto the stroke canvas once; only the tip is redrawn each frame
         const sc = this.strokeCtx(); sc.setTransform(q, 0, 0, q, 0, 0);
-        this.cStroke.style.opacity = this.cur.type === 'highlighter' ? '0.4' : '';
-        this.cStroke.style.zIndex = this.cur.type === 'highlighter' ? '2' : '4';      // highlighting stays under the pen even while it is being drawn
+        this.cStroke.style.opacity = this.cur.type === 'highlighter' ? '0.55' : '';
+        this.cStroke.style.zIndex = this.cur.type === 'highlighter' ? '2' : '4'; this.cStroke.style.mixBlendMode = this.cur.type === 'highlighter' ? 'multiply' : '';      // highlighting stays under the pen even while it is being drawn
         this.strokeIdx = strokeInc(sc, this.cur, this.strokeIdx); this.strokeDirty = true;
         strokeTip(ctx, this.cur, this.pred);
         if (simple) this._tipBox = this.tipBox(this.cur, this.pred);
@@ -1152,7 +1156,7 @@ export class BoardView {
     this.pushUndo({ t: 'create', id: o.id });
     this.lastStroke = (c.type === 'pen' || c.type === 'highlighter') && this.curByPen ? { id: o.id, t: performance.now() } : null;     // (for "hold a finger to make it straight")
     if (this.pageId === c.page_id) {
-      const ctx = (UNDER(o) ? this.cUnder : this.cInk).getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
+      const ctx = (o.type === 'highlighter' ? this.cHl : UNDER(o) ? this.cUnder : this.cInk).getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
     }
     this.clearStroke();
     this.thumbDirty(c.page_id);

@@ -23,6 +23,7 @@ export const HL_SIZES = [14, 24, 38];
 export const TEXT_SIZES = [20, 30, 44];
 export const STAMPS = [['check', 'Tick'], ['cross', 'Cross'], ['star', 'Star'], ['good', 'Good job!'], ['try', 'Try again']];
 export const STAMP_SIZES = [60, 100, 150];
+export const STAMP_COLORS = { check: '#1F8A4C', cross: '#D62F2F', good: '#1F8A4C', try: '#C2570C' };   // each stamp's own colour until the teacher picks another
 export const FONT = "Lexend, system-ui, sans-serif";
 
 // ---------------------------------------------------------------- base pages
@@ -93,20 +94,20 @@ function stampBox(d) {
 }
 
 function drawStamp(ctx, d) {
-  const { x, y, s, k } = d;
+  const { x, y, s, k } = d, cc = isHex(d.c) ? d.c : STAMP_COLORS[k];
   ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   if (k === 'check') {
-    ctx.strokeStyle = '#1F8A4C'; ctx.lineWidth = s * 0.17;
+    ctx.strokeStyle = cc; ctx.lineWidth = s * 0.17;
     ctx.beginPath(); ctx.moveTo(x - s * 0.42, y + s * 0.02); ctx.lineTo(x - s * 0.12, y + s * 0.34); ctx.lineTo(x + s * 0.46, y - s * 0.38); ctx.stroke();
   } else if (k === 'cross') {
-    ctx.strokeStyle = '#D62F2F'; ctx.lineWidth = s * 0.16;
+    ctx.strokeStyle = cc; ctx.lineWidth = s * 0.16;
     ctx.beginPath(); ctx.moveTo(x - s * 0.36, y - s * 0.36); ctx.lineTo(x + s * 0.36, y + s * 0.36); ctx.moveTo(x + s * 0.36, y - s * 0.36); ctx.lineTo(x - s * 0.36, y + s * 0.36); ctx.stroke();
   } else if (k === 'star') {
     ctx.beginPath();
     for (let i = 0; i < 10; i++) { const r = i % 2 ? s * 0.2 : s * 0.48, a = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
     ctx.closePath(); ctx.fillStyle = '#F5B823'; ctx.fill(); ctx.strokeStyle = '#7A4A00'; ctx.lineWidth = s * 0.05; ctx.stroke();
   } else {
-    const label = k === 'good' ? 'Good job!' : 'Try again', col = k === 'good' ? '#1F8A4C' : '#C2570C', { w, h: hh } = stampBox(d);
+    const label = k === 'good' ? 'Good job!' : 'Try again', col = cc, { w, h: hh } = stampBox(d);
     ctx.translate(x, y); ctx.rotate(-0.09);
     ctx.fillStyle = 'rgba(255,255,255,.88)'; ctx.fillRect(-w / 2, -hh / 2, w, hh);
     ctx.strokeStyle = col; ctx.lineWidth = s * 0.06; ctx.lineJoin = 'miter'; ctx.strokeRect(-w / 2, -hh / 2, w, hh);
@@ -150,7 +151,7 @@ export function drawObject(ctx, o, opts = {}) {
       const stride = d.pr ? 3 : 2, n = p.length / stride;
       ctx.lineCap = o.type === 'highlighter' ? 'butt' : 'round'; ctx.lineJoin = 'round';
       ctx.strokeStyle = d.c; ctx.fillStyle = d.c;
-      if (o.type === 'highlighter') ctx.globalAlpha = (opts.alpha || 1) * 0.4;
+      if (o.type === 'highlighter') { ctx.globalAlpha = (opts.alpha || 1) * 0.55; ctx.globalCompositeOperation = 'multiply'; }   // tints the paper; the words under it stay black
       if (n === 1) { ctx.beginPath(); ctx.arc(p[0], p[1], d.s / 2, 0, Math.PI * 2); ctx.fill(); break; }
       if (!d.pr || o.type === 'highlighter') { ctx.lineWidth = d.s; strokeSmooth(ctx, p, stride); break; }
       {
@@ -316,7 +317,7 @@ export function strokeTip(ctx, o, pred) {
   const d = o.data, st = d.pr ? 3 : 2, p = d.p, n = p.length / st;
   if (!n) return;
   ctx.save(); strokeStyleFor(ctx, o);
-  if (o.type === 'highlighter') ctx.globalAlpha = 0.4;
+  if (o.type === 'highlighter') ctx.globalAlpha = 0.55;
   if (d.pr) ctx.lineWidth = d.s * (0.35 + 1.1 * p[(n - 1) * 3 + 2]);
   const lx = p[(n - 1) * st], ly = p[(n - 1) * st + 1];
   if (n === 1 && !(pred && pred.length)) { ctx.beginPath(); ctx.arc(lx, ly, d.s / 2, 0, Math.PI * 2); ctx.fill(); ctx.restore(); return; }
