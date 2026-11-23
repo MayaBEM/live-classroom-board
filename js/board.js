@@ -1,9 +1,10 @@
 // The board screen: page view, drawing tools, live sync, follow-me, lock, laser, panels.
 import { h, uuid, clamp, debounce, throttle, toast, modal, confirmDialog, copyText, asset, joinUrl, BASE } from './util.js';
 import { pencil, TwoFingerTap } from './pencil.js';
+import { pictureFromFile } from './picture.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex } from './render.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
 import { TimerController } from './timer.js';
@@ -17,10 +18,13 @@ import { openAddPages, renameBoardDialog } from './pages.js';
 const TOOLS = [
   ['move', 'Move', 'move'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
   ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow'], ['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'],
-  ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
+  ['image', 'Picture', 'image'], ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
 ];
 const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const SHAPES = new Set(['line', 'arrow', 'rect', 'ellipse']);
+// colours a person chose with the colour picker, kept on this device
+const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem('bem-custom-colors') || '[]'); return Array.isArray(a) ? a.filter(isHex).slice(0, 8) : []; } catch (e) { return []; } };
+const saveRecent = a => { try { localStorage.setItem('bem-custom-colors', JSON.stringify(a)); } catch (e) { /* fine */ } };
 const MIN_S = 0.12, MAX_S = 8;
 
 export class BoardView {
@@ -39,7 +43,7 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent(); this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -68,6 +72,7 @@ export class BoardView {
       st.on('denied', () => toast(st.board && st.board.locked ? 'Writing is locked by your teacher.' : 'That change was not saved.', 'bad')),
       st.on('removed', () => this.showRemoved()),
       pencil.subscribe(() => this.renderRail()),
+      onImagesReady(() => this.scheduleInk()),
     ];
     this.ro = new ResizeObserver(() => this.onResize());
     this.ro.observe(this.stage);
@@ -100,13 +105,17 @@ export class BoardView {
     this.sheet = h('div', { class: 'sheet' });
     this.cBase = h('canvas'); this.cInk = h('canvas'); this.cStroke = h('canvas'); this.cLive = h('canvas');
     this.overlay = h('div', { class: 'overlay' });
+    this.imgBox = h('div', { class: 'img-sel', hidden: true }, h('i', { class: 'img-handle' }));
+    this.overlay.append(this.imgBox);
+    this.fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
+    this.fileInput.addEventListener('change', () => { const f = this.fileInput.files && this.fileInput.files[0]; this.fileInput.value = ''; if (f) this.addPicture(f); });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
     this.sheet.append(this.cBase, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
     this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
     this.elSide = h('aside', { class: 'b-side' });
-    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.stage, this.elSide, this.elOpts);
+    this.el = h('div', { class: 'board side-closed' }, this.elTop, this.stage, this.elSide, this.elOpts, this.fileInput);
     this.root.replaceChildren(this.el);
 
     const s = this.stage;
@@ -353,10 +362,14 @@ export class BoardView {
   setTool(t) {
     if (!this.toolAllowed(t)) return;
     this.commitEditor();
+    const was = this.tool;
     this.tool = t;
+    if (t !== 'image') this.imgSel = null;
     this.stage.classList.toggle('move', t === 'move'); this.stage.classList.toggle('erase', t === 'eraser');
     this.renderRail(); this.renderOpts();
     if (t !== 'laser') this.laserPts = [];
+    this.positionImgBox();
+    if (t === 'image' && was !== 'image') this.pickPicture();    // choosing the picture tool opens the photo chooser right away
   }
 
   // the little panel under the toolbar: colours and sizes of the current tool
@@ -371,9 +384,24 @@ export class BoardView {
       kids.push(h('span', { class: 'note' }, 'Tap the page to place it'));
     } else if (colored) {
       const pal = t === 'highlighter' ? HL_COLORS : (this.copy ? STUDENT_ASSIGN_COLORS : PEN_COLORS), cur = t === 'highlighter' ? this.hlColor : this.color;
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Colour' }, pal.map(([name, hex]) =>
-        h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(cur === hex), onclick: () => { if (t === 'highlighter') this.hlColor = hex; else this.color = hex; this.applyEditorStyle(); this.renderOpts(); } }))));
+      const setCol = hex => { if (t === 'highlighter') this.hlColor = hex; else this.color = hex; this.applyEditorStyle(); };
+      const mine = this.recentColors.filter(x => !pal.some(([, y]) => y === x));
+      if (isHex(cur) && !pal.some(([, y]) => y === cur) && !mine.includes(cur)) mine.unshift(cur);
+      const inp = h('input', { type: 'color', class: 'sw-input', 'aria-label': 'Choose any colour', value: isHex(cur) ? cur.toLowerCase() : '#1f5fbf' });
+      let before = cur;
+      inp.addEventListener('input', () => { if (this.copy && isRedish(inp.value)) return; setCol(inp.value); });          // shows at once while the finger slides over the colours
+      inp.addEventListener('change', () => {
+        if (this.copy && isRedish(inp.value)) { setCol(before); toast('Red is kept for your teacher. Please choose another colour.', 'bad'); this.renderOpts(); return; }
+        setCol(inp.value); this.recentColors = [inp.value, ...this.recentColors.filter(x => x !== inp.value)].slice(0, 8); saveRecent(this.recentColors); this.renderOpts();
+      });
+      kids.push(h('div', { class: 'grp wrap', role: 'group', 'aria-label': 'Colour' },
+        pal.map(([name, hex]) => h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
+        mine.map(hex => h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
+        h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+'))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
+    } else if (t === 'image') {
+      kids.push(h('button', { class: 'btn primary sm', onclick: () => this.pickPicture() }, iconEl('image', 18), 'Add a picture'),
+        h('span', { class: 'note' }, 'Drag a picture to move it. Drag its corner to make it bigger or smaller. The eraser removes it.'));
     } else {
       const notes = { eraser: 'Touch a mark to remove it. Undo brings it back.', laser: 'Move over the page: everyone sees a red dot.' };
       if (notes[t]) kids.push(h('span', { class: 'note' }, notes[t]));
@@ -405,6 +433,35 @@ export class BoardView {
     const ctx = c.getContext('2d'); ctx.scale(2, 2);
     drawObject(ctx, { type: 'stamp', data: { k, x: 24, y: 14, s: k === 'good' || k === 'try' ? 17 : 24 } });
     return c;
+  }
+
+  // ---- pictures
+  pickPicture() { if (this.locked) return toast('Writing is locked by your teacher.', 'bad'); this.fileInput.value = ''; this.fileInput.click(); }
+  async addPicture(file) {
+    if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
+    if (!this.page) return;
+    let have = 0; for (const o of this.store.objs.values()) if (o.type === 'image' && !o.deleted && this.store.canEdit(o)) have++;
+    if (have >= 10) return toast('You can add up to 10 pictures. Erase one first.', 'bad');
+    let pic; try { pic = await pictureFromFile(file); } catch (e) { return toast(e.message || 'This picture cannot be used.', 'bad'); }
+    const r = this.stage.getBoundingClientRect(), sr = this.sheet.getBoundingClientRect(), k = 1000 / sr.width;
+    const c = this.toPage({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    const w0 = Math.max(120, Math.min(480, r.width * k * 0.5)), h0 = w0 * pic.h / pic.w;
+    const x = Math.round(Math.min(Math.max(0, c.x - w0 / 2), 1000 - w0)), y = Math.round(Math.max(0, Math.min(c.y - h0 / 2, this.page.h - h0)));
+    const o = this.store.addObject('image', this.pageId, { src: pic.src, x, y, w: Math.round(w0), h: Math.round(h0) });
+    this.pushUndo({ t: 'create', id: o.id });
+    if (this.tool !== 'image') this.setTool('image');
+    this.renderInk(); this.thumbDirty(this.pageId); this.selectImg(o.id);
+  }
+  selectImg(id) { this.imgSel = id; this.positionImgBox(); }
+  // the frame and corner handle around the picked picture (in page units: the overlay is scaled with the page)
+  positionImgBox() {
+    const b = this.imgBox; if (!b) return;
+    const o = this.imgSel && this.store.objs.get(this.imgSel);
+    if (!o || o.deleted || o.page_id !== this.pageId || this.tool !== 'image') { b.hidden = true; return; }
+    const d = o.data, s = this.view.s || 1;
+    b.hidden = false;
+    Object.assign(b.style, { left: d.x + 'px', top: d.y + 'px', width: d.w + 'px', height: d.h + 'px', borderWidth: 2 / s + 'px' });
+    const hd = b.firstChild; hd.style.width = hd.style.height = 22 / s + 'px'; hd.style.right = hd.style.bottom = -11 / s + 'px'; hd.style.borderWidth = 2 / s + 'px';
   }
 
   placeStamp(p) {
@@ -497,6 +554,7 @@ export class BoardView {
     const v = this.view;
     this.sheet.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.s})`;
     this.sheet.style.borderWidth = Math.max(1, 1 / v.s) + 'px';
+    this.positionImgBox();
     this.scheduleQuality();
     if (this.instr && this.instr.any() || (this.instr && this.instr.remote)) { if (!this._ir) { this._ir = true; requestAnimationFrame(() => { this._ir = false; this.instr.render(); }); } }
     if (!fromRemote) this.broadcastView();
@@ -583,6 +641,7 @@ export class BoardView {
       if (o.deleted || o.id === this.hiddenId) continue;
       drawObject(ctx, o, fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
     }
+    this.positionImgBox();
   }
   scheduleInk() { if (this.inkQueued) return; this.inkQueued = true; requestAnimationFrame(() => { this.inkQueued = false; this.renderInk(); }); }
 
@@ -767,7 +826,7 @@ export class BoardView {
     if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); this.tap.down(this.pointers); return; }   // two fingers never write: they zoom, move, or (a quick tap) undo
     this.suppress = false;
     // "Pencil only": a finger only moves the page
-    if (e.pointerType === 'touch' && pencil.only) { this.startPan(e); return; }
+    if (e.pointerType === 'touch' && pencil.only && this.tool !== 'image') { this.startPan(e); return; }   // (a finger may still move a picture: that is not writing)
     const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (!this.toolAllowed(this.tool));
     if (panning) { this.startPan(e); return; }
     const p = this.toPage(e); this.downAt = { x: e.clientX, y: e.clientY, p, moved: false };
@@ -780,6 +839,13 @@ export class BoardView {
     } else if (SHAPES.has(t)) {
       this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
       this.requestLive();
+    } else if (t === 'image') {
+      const sel = this.imgSel && this.store.objs.get(this.imgSel), k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width;   // page units per screen pixel
+      let target = null, mode = 'move';
+      if (sel && !sel.deleted && sel.page_id === this.pageId && this.store.canEdit(sel)) { const b = bounds(sel); if (Math.hypot(p.x - b.x1, p.y - b.y1) <= 26 * k) { target = sel; mode = 'resize'; } }
+      if (!target) { const list = this.store.pageObjects(this.pageId); for (let i = list.length - 1; i >= 0; i--) { const o = list[i]; if (o.type === 'image' && !o.deleted && this.store.canEdit(o) && hit(o, p.x, p.y, 0)) { target = o; break; } } }
+      if (target) { this.selectImg(target.id); this.imgDrag = { id: target.id, mode, p0: p, before: target.data, moved: false }; }
+      else { this.selectImg(null); this.downAt = null; this.startPan(e); }
     } else if (t === 'eraser') {
       this.eraseIds = []; this.eraseAt(p);
     } else if (t === 'laser') {
@@ -797,6 +863,7 @@ export class BoardView {
     pt.x = e.clientX; pt.y = e.clientY;
     if (this.g) { this.tap.move(e.pointerId, e.clientX, e.clientY); if (this.tap.s && !this.tap.s.moved) return; this.updateGesture(); return; }
     if (this.pan) { this.updatePan(e); return; }
+    if (this.imgDrag) { this.moveImg(e); return; }
     if (!this.downAt) return;
     if (Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 5) this.downAt.moved = true;
     const t = this.tool;
@@ -833,6 +900,15 @@ export class BoardView {
       if (!moved && !cancelled && tool === 'move' && !this.pointers.size) this.whoWrote(this.toPage(e), e);
       return;
     }
+    if (this.imgDrag) {
+      const D = this.imgDrag, o = this.store.objs.get(D.id); this.imgDrag = null; this.downAt = null;
+      if (o) {
+        if (cancelled || !D.moved) { o.data = D.before; o._b = null; }
+        else { const after = o.data; o.data = D.before; this.store.updateData(D.id, after); this.pushUndo({ t: 'edit', id: D.id, before: D.before, after }); this.thumbDirty(o.page_id); }
+        this.scheduleInk();
+      }
+      return;
+    }
     if (this.suppress) { if (!this.pointers.size) this.suppress = false; return; }
     const t = this.tool, da = this.downAt; this.downAt = null;
     if (cancelled) { this.cur = null; this.clearStroke(); this.requestLive(); return; }
@@ -855,6 +931,14 @@ export class BoardView {
     this.skipTextOpen = false;
   }
 
+  moveImg(e) {
+    const D = this.imgDrag, o = this.store.objs.get(D.id); if (!o) return;
+    const p = this.toPage(e), dx = p.x - D.p0.x, dy = p.y - D.p0.y, b = D.before;
+    if (Math.hypot(dx, dy) > 1.5) D.moved = true;
+    if (D.mode === 'move') o.data = { ...b, x: Math.round(Math.min(Math.max(40 - b.w, b.x + dx), 960)), y: Math.round(Math.min(Math.max(40 - b.h, b.y + dy), (this.page ? this.page.h : 1400) - 40)) };
+    else { const w = Math.max(40, Math.min(1400, b.w + dx)); o.data = { ...b, w: Math.round(w), h: Math.round(w * b.h / b.w) }; }
+    o._b = null; this.scheduleInk();
+  }
   cancelCurrent() { this.cur = null; this.downAt = null; this.eraseIds = null; this.clearStroke(); this.requestLive(); }
 
   finishCur() {

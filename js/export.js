@@ -90,6 +90,8 @@ const safe = s => String(s).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-'
 export function exportDialog({ sb, store, students, label }) {
   const many = students.length > 1;
   const only = h('input', { type: 'checkbox', id: 'ow', checked: many });
+  const anySub = students.some(x => x.submitted_at);
+  const subOnly = h('input', { type: 'checkbox', id: 'so', checked: true });
   const bar = h('div', { class: 'progress', hidden: true }, h('div'));
   const msg = h('p', { class: 'hint', style: { marginTop: '8px' } });
   const err = h('p', { class: 'error', role: 'alert' });
@@ -99,6 +101,7 @@ export function exportDialog({ sb, store, students, label }) {
     title: many ? 'Export the whole class as PDF' : `Export ${label} as PDF`,
     body: h('div', null,
       h('p', null, many ? `One PDF with the work of ${students.length} students, each page marked with the student's name, plus the teacher's feedback, stamps and scores.` : 'One PDF with every page: the student\'s writing, your feedback and stamps, and a last page with the score and comment.'),
+      many && anySub ? h('label', { style: { display: 'flex', gap: '10px', alignItems: 'center', margin: '14px 0 0', fontWeight: '500' } }, subOnly, `Only students who submitted (${students.filter(x => x.submitted_at).length} of ${students.length})`) : null,
       h('label', { style: { display: 'flex', gap: '10px', alignItems: 'center', margin: '14px 0', fontWeight: '500' } }, only, 'Only pages with writing on them'),
       bar, msg, err),
     actions: [h('button', { class: 'btn', onclick: () => { cancelled = true; m.close(); } }, 'Close'), go],
@@ -107,7 +110,7 @@ export function exportDialog({ sb, store, students, label }) {
   go.addEventListener('click', async () => {
     if (running) return; running = true; cancelled = false; err.textContent = ''; go.disabled = true; bar.hidden = false;
     try {
-      const sorted = [...students].sort((a, b) => a.name.localeCompare(b.name));
+      const sorted = [...students].filter(x => !(many && anySub && subOnly.checked) || x.submitted_at).sort((a, b) => a.name.localeCompare(b.name));
       const bytes = await buildPdf({ sb, store, students: sorted, onlyWritten: only.checked, isCancelled: () => cancelled, onProgress: (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; } });
       download(bytes, `${safe(store.board.title)}-${many ? 'class' : safe(label)}.pdf`);
       toast('PDF saved to your downloads.', 'ok'); cancelled = true; m.close();

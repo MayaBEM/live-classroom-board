@@ -3,9 +3,20 @@
 export const PEN_COLORS = [
   ['Black', '#1D2127'], ['Blue', '#1F5FBF'], ['Red', '#D62F2F'], ['Green', '#1F8A4C'],
   ['Orange', '#EE7A1C'], ['Brown', '#7A4A2A'], ['Teal', '#0E8A9A'], ['Pink', '#D9488F'],
+  ['Purple', '#7A3FA0'], ['Navy', '#23308F'], ['Gold', '#E0A800'], ['Lime', '#6BA82E'], ['Sky', '#2EA3DB'], ['Grey', '#6B7480'],
 ];
-// In an assignment, red is kept for the teacher's feedback, so students get purple instead
-export const STUDENT_ASSIGN_COLORS = PEN_COLORS.map(c => c[0] === 'Red' ? ['Purple', '#7A3FA0'] : c);
+// In an assignment, red is kept for the teacher's feedback, so students do not get red (purple and the others are there)
+export const STUDENT_ASSIGN_COLORS = PEN_COLORS.filter(c => c[0] !== 'Red');
+// a colour a person chose with the colour picker: "#RRGGBB" only
+export const isHex = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+// is this colour a red (the teacher's feedback colour)?
+export function isRedish(hex) {
+  const n = parseInt(hex.slice(1), 16), r = (n >> 16) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d || mx < 0.35 || d / mx < 0.45) return false;
+  let hue = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; hue = (hue * 60 + 360) % 360;
+  return hue < 16 || hue > 344;
+}
 export const HL_COLORS = [
   ['Yellow', '#FFE45C'], ['Lime', '#B8E65C'], ['Green', '#6FD39A'], ['Cyan', '#6FD8E8'],
   ['Blue', '#8DB7FF'], ['Pink', '#FF9EC4'], ['Orange', '#FFB566'], ['Grey', '#C9CFD6'],
@@ -108,6 +119,26 @@ function drawStamp(ctx, d) {
   ctx.restore();
 }
 
+// ---------------------------------------------------------------- pictures (small JPEGs kept inside the object)
+const IMGS = new Map(), imgWatchers = new Set();
+const validSrc = s => typeof s === 'string' && s.length < 320000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(s);   // only our own small pictures: never an address on the internet
+export function onImagesReady(fn) { imgWatchers.add(fn); return () => imgWatchers.delete(fn); }
+function imgEntry(o) {
+  const src = o.data.src; let e = IMGS.get(o.id);
+  if (e && e.src === src) return e;
+  e = { src, img: null, ok: false, p: Promise.resolve() };
+  if (validSrc(src)) {
+    const img = new Image(); e.img = img;
+    e.p = new Promise(res => { img.onload = () => { e.ok = true; imgWatchers.forEach(f => f()); res(); }; img.onerror = () => res(); });
+    img.src = src;
+  }
+  IMGS.delete(o.id); IMGS.set(o.id, e);
+  while (IMGS.size > 120) IMGS.delete(IMGS.keys().next().value);
+  return e;
+}
+// wait until every picture among these objects is ready to draw (thumbnails and PDF export call this first)
+export function preloadImages(objs) { return Promise.all((objs || []).filter(o => o.type === 'image' && !o.deleted && o.data).map(o => imgEntry(o).p)); }
+
 export function drawObject(ctx, o, opts = {}) {
   const d = o.data;
   if (!d) return;
@@ -164,6 +195,11 @@ export function drawObject(ctx, o, opts = {}) {
       break;
     }
     case 'stamp': drawStamp(ctx, d); break;
+    case 'image': {
+      const e = imgEntry(o);
+      if (e.ok) ctx.drawImage(e.img, d.x, d.y, d.w, d.h); else { ctx.fillStyle = '#E8EDF2'; ctx.fillRect(d.x, d.y, d.w, d.h); }
+      break;
+    }
     default: break;
   }
   ctx.restore();
@@ -180,6 +216,8 @@ export function bounds(o) {
   if (o.type === 'pen' || o.type === 'highlighter') {
     const stride = d.pr ? 3 : 2; x0 = y0 = Infinity; x1 = y1 = -Infinity;
     for (let i = 0; i < d.p.length; i += stride) { x0 = Math.min(x0, d.p[i]); x1 = Math.max(x1, d.p[i]); y0 = Math.min(y0, d.p[i + 1]); y1 = Math.max(y1, d.p[i + 1]); }
+  } else if (o.type === 'image') {
+    x0 = d.x; y0 = d.y; x1 = d.x + d.w; y1 = d.y + d.h;
   } else if (o.type === 'stamp') {
     const b = stampBox(d); x0 = d.x - b.w / 2; x1 = d.x + b.w / 2; y0 = d.y - b.h / 2; y1 = d.y + b.h / 2;
   } else if (o.type === 'text') {
@@ -218,7 +256,7 @@ export function hit(o, x, y, r) {
       const tol = w / Math.min(rx, ry);
       return Math.abs(k - 1) <= tol;
     }
-    case 'text': case 'stamp': return true;
+    case 'text': case 'stamp': case 'image': return true;
     default: return false;
   }
 }

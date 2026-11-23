@@ -6,7 +6,8 @@ import { h } from './util.js';
 import { iconEl } from './icons.js';
 import { pencil, TwoFingerTap } from './pencil.js';
 
-export const STUDENT_INK = ['#1D2127', '#1F5FBF', '#D62F2F', '#1F8A4C'];
+export const STUDENT_INK = ['#1D2127', '#1F5FBF', '#D62F2F', '#1F8A4C', '#EE7A1C', '#7A3FA0'];   // new colours are only ever added at the end: saved strokes keep their colour
+const HEX = /^#[0-9a-fA-F]{6}$/;    // a colour a person chose with the colour picker is saved as "#RRGGBB"
 export const TEACHER_INK = '#7B2CBF';
 
 const ERASE_R = 34;      // how close the eraser must be to a line (out of 1000)
@@ -29,7 +30,7 @@ function drawStrokes(ctx, strokes, inks, W, H, widthPx, tip) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = widthPx;
   for (const s of strokes) {
     let p = s.p || []; if (p.length < 2) continue;
-    ctx.strokeStyle = Array.isArray(inks) ? (inks[s.c] || inks[0]) : inks;
+    ctx.strokeStyle = Array.isArray(inks) ? (typeof s.c === 'string' ? (HEX.test(s.c) ? s.c : inks[0]) : (inks[s.c] || inks[0])) : inks;
     ctx.fillStyle = ctx.strokeStyle;
     if (tip && s === strokes[strokes.length - 1]) p = p.concat(tip);
     if (p.length === 2) { ctx.beginPath(); ctx.arc(p[0] / 1000 * W, p[1] / 1000 * H, widthPx / 2, 0, Math.PI * 2); ctx.fill(); continue; }
@@ -70,7 +71,12 @@ export class IdeaBoard {
     this.btnClear = mk('clear', 'Clear my writing', 'trash', () => this.clear());
     this.btnPencil = mk('pencilonly', 'Pencil only', 'hand', () => pencil.toggle());
     this.dots = Array.isArray(this.ink) ? this.ink.map((c, i) => { const d = h('button', { type: 'button', class: 'ib dot', 'aria-label': 'Colour ' + (i + 1), onclick: () => { this.colour = i; this.tool = 'pen'; this.refreshBar(); } }); d.style.setProperty('--c', c); return d; }) : [];
-    const bar = h('div', { class: 'idea-bar' }, this.label ? h('span', { class: 'idea-label' }, this.label) : null, this.btnPen, this.dots, this.btnErase, this.btnUndo, this.btnClear, this.btnPencil);
+    // any colour of your own
+    this.picker = h('input', { type: 'color', class: 'sw-input', 'aria-label': 'Choose any colour', value: '#1f5fbf' });
+    this.picker.addEventListener('input', () => { this.colour = this.picker.value; this.tool = 'pen'; this.refreshBar(); });
+    this.picker.addEventListener('change', () => { this.colour = this.picker.value; this.tool = 'pen'; this.refreshBar(); });
+    this.btnCustom = h('label', { class: 'ib dot custom', title: 'Choose any colour' }, this.picker, h('span', { 'aria-hidden': 'true' }, '+'));
+    const bar = h('div', { class: 'idea-bar' }, this.label ? h('span', { class: 'idea-label' }, this.label) : null, this.btnPen, this.dots, this.btnCustom, this.btnErase, this.btnUndo, this.btnClear, this.btnPencil);
     // a resting hand must not press the colours or the other buttons while the pencil is writing
     const block = e => { if (e.pointerType === 'touch' && (pencil.recent() || this.down !== null && this.downType === 'pen')) { e.preventDefault(); e.stopPropagation(); this.palmAt = performance.now(); } };
     bar.addEventListener('pointerdown', block, true);
@@ -83,6 +89,7 @@ export class IdeaBoard {
     if (!this.btnPen) return;
     this.btnPen.setAttribute('aria-pressed', String(this.tool === 'pen')); this.btnErase.setAttribute('aria-pressed', String(this.tool === 'eraser'));
     this.dots.forEach((d, i) => d.setAttribute('aria-pressed', String(this.tool === 'pen' && this.colour === i)));
+    if (this.btnCustom) { const on = this.tool === 'pen' && typeof this.colour === 'string'; this.btnCustom.setAttribute('aria-pressed', String(on)); this.btnCustom.style.setProperty('--c', on ? this.colour : '#fff'); }
     this.btnClear.classList.toggle('armed', this.clearArmed);
     this.btnClear.setAttribute('aria-label', this.clearArmed ? 'Tap again to clear' : 'Clear my writing');
     const only = pencil.only;
