@@ -808,3 +808,24 @@ input, textarea, select { font-size: max(16px, 1em); }
 .lib-imp-top input { width: 22px; height: 22px; flex: none; }
 .lib-thumb.sm { width: 48px; height: 48px; }
 .lib-link { font-size: 16px; }
+
+/* ---- student page on every screen: the same page, kept in balance
+   laptop / iPad sideways (over 860 wide): games on the left, work on the right
+   iPad upright and phone (860 or less): one column, work first, then the games; this has to come last so it wins over the two-column rules above */
+@media (max-width: 860px) {
+  .me-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .me-grid.no-apps { max-width: none; }
+  .me-work { order: -1; }
+  .me-apps { position: static; max-height: none; overflow: visible; padding: 0 12px 12px; }
+  .me-apps .bsec { position: static; margin: 0 -12px 10px; padding: 12px 12px 6px; }
+  .me-apps .agrid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+  .me-apps .atile .at { font-size: 13px; }
+  .me-top { align-items: flex-start; }
+  .idea-slot { width: 270px; }
+}
+@media (max-width: 600px) {
+  .me-top { flex-direction: column; align-items: stretch; gap: 12px; }
+  .me-top .join-head { flex: none; }
+  .idea-slot, .idea-wrap.big { width: 100%; }
+  .me-apps .agrid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+}
