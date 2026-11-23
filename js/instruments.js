@@ -1,4 +1,4 @@
-// Protractor and ruler: movable, rotatable, resizable instruments drawn over the page (SVG, in page units).
+// Protractor, ruler and compass: movable, rotatable, resizable instruments drawn over the page (SVG, in page units).
 //  - the protractor has an arm you drag to read an angle; the ruler shows real millimetres and centimetres
 //  - the teacher can show their instruments to the class (a live class); everybody can also use their own
 const NS = 'http://www.w3.org/2000/svg';
@@ -21,7 +21,7 @@ export class Instruments {
   // view: the BoardView (needs .page, .view.s, .currentViewPayload(), .pageMm, .overlay); onChange(state) is called when local instruments change
   constructor(view, onChange) {
     this.view = view; this.onChange = onChange || (() => {});
-    this.local = { protractor: null, ruler: null }; this.remote = null; this.remoteTimer = null;
+    this.local = { protractor: null, ruler: null, compass: null }; this.remote = null; this.arc = null; this.remoteTimer = null;
     this.drag = null; this.sharing = false;
     this.layer = document.createElementNS(NS, 'svg');
     this.layer.setAttribute('class', 'instr-layer');
@@ -31,7 +31,7 @@ export class Instruments {
 
   attach(overlay) { overlay.append(this.layer); this.fit(); this.render(); }
   detach() { window.removeEventListener('pointermove', this.winMove); window.removeEventListener('pointerup', this.winUp); window.removeEventListener('pointercancel', this.winUp); clearTimeout(this.remoteTimer); this.layer.remove(); }
-  any() { return !!(this.local.protractor || this.local.ruler); }
+  any() { return !!(this.local.protractor || this.local.ruler || this.local.compass); }
   fit() { const pg = this.view.page; if (!pg) return; this.layer.setAttribute('viewBox', `0 0 1000 ${pg.h}`); }
 
   // units per millimetre on the current page (a PDF knows its real size; otherwise A4 is assumed)
@@ -46,17 +46,18 @@ export class Instruments {
     else {
       const c = this.view.currentViewPayload(), upm = this.upm(), vw = c.vw || 800;
       if (kind === 'protractor') this.local.protractor = { x: c.cx, y: c.cy + c.vh * 0.12, rot: 0, R: clamp(60 * upm, 90, Math.max(90, vw * 0.3)), arm: 45 };
+      else if (kind === 'compass') this.local.compass = { x: c.cx - Math.min(vw * 0.1, 120), y: c.cy + c.vh * 0.1, rot: 0, R: Math.round(clamp(40 * upm, 70, Math.max(70, vw * 0.25)) / (5 * upm)) * 5 * upm };
       else this.local.ruler = { x: c.cx, y: c.cy - c.vh * 0.22, rot: 0, L: clamp(150 * upm, 120, Math.max(120, vw * 0.8)) };
     }
     this.render(); this.changed();
   }
 
   changed() { this.onChange(this.shared()); }
-  shared() { return { page: this.view.pageId, protractor: this.local.protractor, ruler: this.local.ruler, upm: this.upm() }; }
+  shared() { return { page: this.view.pageId, protractor: this.local.protractor, ruler: this.local.ruler, compass: this.local.compass, upm: this.upm() }; }
 
   setRemote(p) {
     clearTimeout(this.remoteTimer);
-    this.remote = p && p.page === this.view.pageId && (p.protractor || p.ruler) ? p : null;
+    this.remote = p && p.page === this.view.pageId && (p.protractor || p.ruler || p.compass) ? p : null;
     this.render();
     if (this.remote) this.remoteTimer = setTimeout(() => { this.remote = null; this.render(); }, 9000);   // the teacher's copy fades if the teacher stops sending
   }
@@ -69,8 +70,11 @@ export class Instruments {
     const r = this.remote && this.remote.page === this.view.pageId ? this.remote : null;
     if (r && r.ruler) out.push(this.rulerSvg(r.ruler, r.upm || upm, hr, true));
     if (r && r.protractor) out.push(this.protractorSvg(r.protractor, hr, true));
+    if (r && r.compass) out.push(this.compassSvg(r.compass, r.upm || upm, hr, true));
     if (this.local.ruler) out.push(this.rulerSvg(this.local.ruler, upm, hr, false));
     if (this.local.protractor) out.push(this.protractorSvg(this.local.protractor, hr, false));
+    if (this.local.compass) out.push(this.compassSvg(this.local.compass, upm, hr, false));
+    if (this.arc) out.push(this.arcSvg());
     this.layer.innerHTML = out.join('');
   }
 
@@ -132,6 +136,41 @@ export class Instruments {
     </g>`;
   }
 
+  // the compass: the needle stays put, the pencil end goes round it at a fixed radius and draws (a circle or an arc)
+  compassGeom(p) {
+    const R = p.R, Ll = Math.max(R * 0.75, 140), h = Math.sqrt(Math.max(1, Ll * Ll - (R / 2) * (R / 2)));
+    return { R, h };
+  }
+  compassSvg(p, upm, hr, remote) {
+    const { R, h } = this.compassGeom(p), col = remote ? '#1F6F78' : '#1D2127', pen = remote ? '#1F6F78' : this.view.color || '#1D2127';
+    const cm = Math.round(R / upm / 5) * 5 / 10, label = `r = ${cm} cm`, fs = Math.max(11, hr * 0.95), bw = fs * (label.length * 0.58 + 1);
+    const hx = f(R / 2), hy = f(-h), lx = f(R / 2), ly = f(-h - hr * 2.7);
+    const handles = remote ? '' : `
+      <circle data-k="compass" data-h="rot" cx="${f(-hr * 3)}" cy="0" r="${f(hr)}" fill="#D5E8E9" stroke="#1F6F78" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:alias"/>
+      <path d="M${f(-hr * 3 - hr * 0.45)} ${f(-hr * 0.1)}a${f(hr * 0.45)} ${f(hr * 0.45)} 0 1 1 ${f(hr * 0.9)} 0" fill="none" stroke="#1F6F78" stroke-width="2" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <rect data-k="compass" data-h="size" x="${f(R / 2 - hr)}" y="${f(-h - hr)}" width="${f(hr * 2)}" height="${f(hr * 2)}" fill="#fff" stroke="#1D2127" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:ew-resize"/>
+      <circle data-k="compass" data-h="draw" cx="${f(R)}" cy="0" r="${f(hr * 1.15)}" fill="#FF9150" stroke="#1D2127" stroke-width="2" vector-effect="non-scaling-stroke" style="cursor:crosshair"/>`;
+    return `<g class="instr ${remote ? 'remote' : ''}" transform="translate(${f(p.x)} ${f(p.y)}) rotate(${f(p.rot)})" style="pointer-events:${remote ? 'none' : 'auto'}">
+      <line x1="0" y1="0" x2="${f(R)}" y2="0" stroke="${col}" stroke-width="1" stroke-dasharray="6 5" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <line data-k="compass" data-h="move" x1="0" y1="0" x2="${hx}" y2="${hy}" stroke="transparent" stroke-width="22" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:${remote ? 'none' : 'stroke'};cursor:move"/>
+      <line x1="0" y1="0" x2="${hx}" y2="${hy}" stroke="#6a727b" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <line x1="${f(R)}" y1="0" x2="${hx}" y2="${hy}" stroke="${pen}" stroke-width="5" stroke-linecap="round" vector-effect="non-scaling-stroke" style="pointer-events:none"/>
+      <circle cx="0" cy="0" r="${f(hr * 0.5)}" fill="#1D2127" style="pointer-events:none"/>
+      <circle data-k="compass" data-h="move" cx="0" cy="0" r="${f(hr * 1.2)}" fill="rgba(255,255,255,0.01)" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke" style="cursor:move;pointer-events:${remote ? 'none' : 'auto'}"/>
+      <g transform="translate(${lx} ${ly}) rotate(${f(-p.rot)})" style="pointer-events:none">
+        <rect x="${f(-bw / 2)}" y="${f(-fs * 0.8)}" width="${f(bw)}" height="${f(fs * 1.6)}" fill="#fff" stroke="${col}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+        <text x="0" y="0" font-size="${f(fs)}" font-weight="600" text-anchor="middle" dominant-baseline="middle" fill="${col}">${label}</text>
+      </g>
+      ${handles}
+    </g>`;
+  }
+  // the arc being drawn right now (shown until the pencil is lifted)
+  arcSvg() {
+    const a = this.arc; if (!a || !a.pts.length) return '';
+    const d = a.pts.map((q, i) => (i ? 'L' : 'M') + f(q[0]) + ' ' + f(q[1])).join('');
+    return `<path d="${d}" fill="none" stroke="${a.c}" stroke-width="${a.s}" stroke-linecap="round" stroke-linejoin="round" style="pointer-events:none"/>`;
+  }
+
   // ------------------------------------------------------------ interaction
   down(e) {
     const t = e.target.closest && e.target.closest('[data-h]'); if (!t) return;
@@ -139,6 +178,11 @@ export class Instruments {
     e.preventDefault(); e.stopPropagation();
     const p = this.view.toPage(e);
     this.drag = { kind, mode, id: e.pointerId, ox: p.x - st.x, oy: p.y - st.y };
+    if (kind === 'compass' && mode === 'draw') {
+      const a0 = Math.atan2(p.y - st.y, p.x - st.x); this.drag.a0 = a0; this.drag.last = a0; this.drag.sweep = 0; st.rot = f(deg(a0));
+      this.arc = { c: this.view.color || '#1D2127', s: this.view.penWidth ? this.view.penWidth() : 4.8, pts: [[st.x + st.R * Math.cos(a0), st.y + st.R * Math.sin(a0)]] };
+    }
+    if (kind === 'compass' && mode === 'size') { const a = rad(st.rot); this.drag.off = (p.x - st.x) * Math.cos(a) + (p.y - st.y) * Math.sin(a) - st.R / 2; }
     if (mode === 'size' && kind === 'ruler') {   // the left end stays where it is
       const a = rad(st.rot); this.drag.p0 = { x: st.x - Math.cos(a) * st.L / 2, y: st.y - Math.sin(a) * st.L / 2 };
     }
@@ -150,8 +194,19 @@ export class Instruments {
     const st = this.local[d.kind], p = this.view.toPage(e), upm = this.upm();
     if (d.mode === 'move') { st.x = p.x - d.ox; st.y = p.y - d.oy; }
     else if (d.mode === 'rot') { st.rot = f(normAngle(deg(Math.atan2(p.y - st.y, p.x - st.x)) - 180)); }
+    else if (d.mode === 'draw') {
+      const a = Math.atan2(p.y - st.y, p.x - st.x); let dl = a - d.last; if (dl > Math.PI) dl -= 2 * Math.PI; if (dl < -Math.PI) dl += 2 * Math.PI;
+      d.sweep += dl; d.last = a; st.rot = f(deg(a));
+      const n = Math.max(1, Math.ceil(Math.abs(d.sweep) / rad(1.5))), pts = [];
+      for (let i = 0; i <= n; i++) { const t = d.a0 + d.sweep * i / n; pts.push([st.x + st.R * Math.cos(t), st.y + st.R * Math.sin(t)]); }
+      this.arc.pts = pts;
+    }
+    else if (d.mode === 'size' && d.kind === 'compass') {
+      const a = rad(st.rot), lx = (p.x - st.x) * Math.cos(a) + (p.y - st.y) * Math.sin(a) - d.off;
+      st.R = clamp(Math.round(lx * 2 / upm / 5) * 5, 10, 120) * upm;   // snaps to 5 mm
+    }
     else if (d.mode === 'arm') { st.arm = f(readAngle(st.x, st.y, st.rot, p.x, p.y)); }
-    else if (d.mode === 'size') {
+    else if (d.mode === 'size' && d.kind !== 'compass') {
       if (d.kind === 'protractor') st.R = clamp(Math.hypot(p.x - st.x, p.y - st.y) - this.handleR() * 1.0, 70, 520);
       else {
         const a = rad(st.rot), u = { x: Math.cos(a), y: Math.sin(a) };
@@ -166,6 +221,15 @@ export class Instruments {
   up(e) {
     const d = this.drag; if (!d || e.pointerId !== d.id) return;
     this.drag = null;
+    if (d.mode === 'draw') {
+      const st = this.local.compass, a = this.arc; this.arc = null;
+      if (st && a && Math.abs(d.sweep) > rad(2) && e.type !== 'pointercancel') {
+        const full = Math.abs(d.sweep) >= rad(350), sw = full ? Math.sign(d.sweep) * 2 * Math.PI : d.sweep;
+        this.view.addCompassArc && this.view.addCompassArc(st.x, st.y, st.R, d.a0, sw);
+        if (full) st.rot = f(deg(d.a0));
+      }
+      this.render();
+    }
     window.removeEventListener('pointermove', this.winMove); window.removeEventListener('pointerup', this.winUp); window.removeEventListener('pointercancel', this.winUp);
     this.changed();
   }

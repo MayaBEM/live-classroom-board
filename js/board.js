@@ -396,7 +396,7 @@ export class BoardView {
       if (id === 'move' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
     }
     items.push(h('span', { class: 'tsep' }));
-    for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler']]) {
+    for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler'], ['compass', 'Compass']]) {
       items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', 'aria-label': label, onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k, 22)));
     }
     const only = pencil.only;
@@ -680,7 +680,17 @@ export class BoardView {
     try { this.pageMm[pg.id] = await pdfPageMm(this.sb, pg.file_path, pg.pdf_page); if (this.pageId === pg.id) this.instr.render(); } catch (e) { /* default A4 */ }
   }
 
-  // ---- instruments (protractor, ruler)
+  // ---- instruments (protractor, ruler, compass)
+  penWidth() { return PEN_SIZES[this.sizeIdx]; }
+  // the compass draws a circle or an arc: it becomes an ordinary pen stroke (so it can be undone, erased, moved by the teacher, and seen live)
+  addCompassArc(cx, cy, R, a0, sweep) {
+    if (!this.page || (this.locked && !this.isTeacher)) { toast('Writing is locked by your teacher.', 'bad'); return; }
+    const n = Math.max(8, Math.ceil(Math.abs(sweep) / (Math.PI / 90))), p = [];
+    for (let i = 0; i <= n; i++) { const t = a0 + sweep * i / n; p.push(cx + R * Math.cos(t), cy + R * Math.sin(t)); }
+    if (Math.abs(sweep) >= 2 * Math.PI - 1e-6) { p[p.length - 2] = p[0]; p[p.length - 1] = p[1]; }   // a full circle closes exactly
+    this.cur = { id: uuid(), type: 'pen', page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx], pr: 0, p: p.map(v => Math.round(v * 20) / 20) } };
+    this.sentTo = 0; this.curByPen = false; this.finishCur();
+  }
   onInstrChange(state) {
     if (!(this.isTeacher && !this.assign && this.instr.sharing)) return;
     if (!this._si) this._si = throttle(s => this.store.sendInstr(s), 60);
@@ -691,7 +701,7 @@ export class BoardView {
     if (!(this.isTeacher && !this.assign && !this.review)) return;
     const on = !this.privateMode; this.instr.sharing = on; clearInterval(this.shareTimer);
     if (on) { this.store.sendInstr(this.instr.shared()); this.shareTimer = setInterval(() => { if (!this.privateMode) this.store.sendInstr(this.instr.shared()); }, 4000); }
-    else this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null });
+    else this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null, compass: null });
   }
   // ---- the teacher works in private (nothing she writes, draws, places or points at is seen by the students) or in the open
   renderPrivBtn() {
