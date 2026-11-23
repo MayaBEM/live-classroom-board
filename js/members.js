@@ -37,7 +37,7 @@ export function checklist(items, checked, { empty = 'Nobody to choose from.' } =
     const cb = h('input', { type: 'checkbox', checked: on.has(s.id), 'aria-label': s.first_name });
     cb.addEventListener('change', () => { if (cb.checked) on.add(s.id); else on.delete(s.id); upd(); });
     boxes.set(s.id, cb);
-    return h('label', { class: 'pick ' + TILE[i % TILE.length] }, cb, h('span', { class: 'nm' }, s.first_name), s.code ? h('span', { class: 'cd' }, s.code) : null);
+    return h('label', { class: 'pick ' + TILE[i % TILE.length], title: s.first_name }, cb, h('span', { class: 'nm' }, s.first_name), s.code ? h('span', { class: 'cd' }, s.code) : null);
   });
   const setAll = v => { items.forEach(s => { boxes.get(s.id).checked = v; if (v) on.add(s.id); else on.delete(s.id); }); upd(); };
   upd();

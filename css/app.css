@@ -963,3 +963,8 @@ input, textarea, select { font-size: max(16px, 1em); }
 .pop-col { width: 354px; max-width: 100%; }
 .pop-row { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
 .pop-row .btn.sm { padding: 0 9px; }
+
+/* ---- long names in tick lists must never run over the next row */
+.pick-list, .lib-list, .lib-imp-list { grid-auto-rows: max-content; align-content: start; }
+.pick { height: auto; align-items: center; }
+.pick .nm { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; }
