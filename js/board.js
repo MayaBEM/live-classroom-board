@@ -904,7 +904,7 @@ export class BoardView {
   }
 
   onMove(e) {
-    if (e.pointerType === 'pen') pencil.pen();
+    if (e.pointerType === 'pen' && this.pointers.has(e.pointerId)) pencil.pen();     // (a pencil only hovering over the screen does not count: fingers must still work then)
     const pt = this.pointers.get(e.pointerId);
     if (!pt) {
       if (this.tool === 'laser' && this.isTeacher && this.page && e.pointerType === 'mouse') this.laserMove(this.toPage(e));
@@ -948,7 +948,7 @@ export class BoardView {
     if (this.g) {
       const tapN = this.tap.up(e.pointerId);
       if (tapN === 2 && !cancelled) this.doUndo();           // two fingers tapped together: undo
-      else if (tapN === 3 && !cancelled) this.doRedo();      // three fingers tapped together: redo (bring it back)
+      else if (tapN === 3 && (!cancelled || !this.penActive())) this.doRedo();      // three fingers tapped together: redo (bring it back). (iPad may cancel a 3-finger touch: that counts too)
       else if (!cancelled && !this.g.swiped && this.pointers.size === 1) {                // two fingers swept sideways: turn the page
         const rem = [...this.pointers.values()][0], g = this.g, cx = (e.clientX + rem.x) / 2, cy = (e.clientY + rem.y) / 2;
         const dx = cx - g.sx, dy = cy - g.sy, d = Math.hypot(e.clientX - rem.x, e.clientY - rem.y), ok = d / g.d > 0.8 && d / g.d < 1.25;

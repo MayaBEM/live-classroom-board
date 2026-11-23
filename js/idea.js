@@ -194,7 +194,7 @@ export class IdeaBoard {
       else { this.cur = { c: this.colour, p: [x, y] }; this.straight = false; this.drawLive(); }
     });
     c.addEventListener('pointermove', e => {
-      if (e.pointerType === 'pen') pencil.pen();
+      if (e.pointerType === 'pen' && this.down === e.pointerId) pencil.pen();
       const t = this.touches.get(e.pointerId); if (t) { t.x = e.clientX; t.y = e.clientY; this.tap.move(e.pointerId, e.clientX, e.clientY); }
       if (this.down !== e.pointerId) return; e.preventDefault();
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
@@ -220,7 +220,7 @@ export class IdeaBoard {
       if (this.touches.has(e.pointerId)) {
         this.touches.delete(e.pointerId);
         const tapN = this.tap.up(e.pointerId);
-        if (e.type === 'pointerup') { if (tapN === 2) this.undo(); else if (tapN === 3) this.redo(); }      // two fingers tapped together: undo; three fingers: redo
+        if (tapN === 3) this.redo(); else if (tapN === 2 && e.type === 'pointerup') this.undo();      // two fingers tapped together: undo; three fingers: redo
         if (!this.touches.size) this.tap.reset();
       }
       if (this.down !== e.pointerId) return;

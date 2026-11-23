@@ -23,7 +23,7 @@ export const pencil = {
     if (!seen) { seen = true; save(); if (mode === 'auto') tell(); }
   },
   // within ms of the pen touching, a finger is a resting hand
-  recent(ms = 900) { return performance.now() - lastPen < ms; },
+  recent(ms = 450) { return performance.now() - lastPen < ms; },
   toggle() { mode = this.only ? 'any' : 'only'; save(); tell(); return this.only; },
   get straight() { return straightOn; },
   toggleStraight() { straightOn = !straightOn; try { localStorage.setItem('bem-straight', straightOn ? '1' : '0'); } catch (e) { /* fine */ } tell(); return straightOn; },
@@ -38,12 +38,12 @@ export class TwoFingerTap {
   down(pts) {   // pts: Map of pointer id -> {x, y}, after the new finger was added
     const now = performance.now(), copy = () => new Map([...pts].map(([k, v]) => [k, { x: v.x, y: v.y }]));
     if (pts.size === 2) this.s = { t: now, n: 2, start: copy(), moved: false, done: false };
-    else if (pts.size === 3 && this.s && this.s.n === 2 && !this.s.done && !this.s.moved && now - this.s.t < 160) this.s = { t: this.s.t, n: 3, start: copy(), moved: false, done: false };   // the third finger came right after the second
+    else if (pts.size === 3 && this.s && this.s.n === 2 && !this.s.done && !this.s.moved && now - this.s.t < 260) this.s = { t: this.s.t, n: 3, start: copy(), moved: false, done: false };   // the third finger came right after the second
     else this.s = null;
   }
   move(id, x, y) { const s = this.s, p = s && s.start.get(id); if (p && Math.hypot(x - p.x, y - p.y) > 14) s.moved = true; }
   up(id) {
     const s = this.s; if (!s || !s.start.has(id)) return 0;
-    const ok = !s.moved && !s.done && performance.now() - s.t < 350; s.done = true; return ok ? s.n : 0;
+    const ok = !s.moved && !s.done && performance.now() - s.t < (s.n === 3 ? 550 : 350); s.done = true; return ok ? s.n : 0;
   }
 }
