@@ -5,7 +5,7 @@ import { friendlyError } from './db.js';
 import { BoardView } from './board.js';
 import { PageRenderer } from './thumbs.js';
 import { exportDialog } from './export.js';
-import { openAddPages } from './pages.js';
+import { openAddPages, scheduleDialog } from './pages.js';
 import { TimerController } from './timer.js';
 import { shareDialog } from './share.js';
 import { boardRoster, boardStudentsDialog } from './members.js';
@@ -237,25 +237,7 @@ export class ReviewView {
   }
   shareDialog() { return shareDialog({ sb: this.sb, store: this.store }); }
 
-  datesDialog() {
-    const b = this.store.board;
-    const start = h('input', { class: 'input', id: 'sd', type: 'datetime-local', value: toLocalInput(b.starts_at) });
-    const due = h('input', { class: 'input', id: 'dd', type: 'datetime-local', value: toLocalInput(b.due_at) });
-    const err = h('p', { class: 'error', role: 'alert' });
-    const m = modal({
-      title: 'Start and due time',
-      body: h('div', null,
-        h('div', { class: 'field' }, h('label', { for: 'sd' }, 'Opens at (optional)'), start, h('span', { class: 'hint' }, 'Before this time students cannot open the assignment.')),
-        h('div', { class: 'field' }, h('label', { for: 'dd' }, 'Due at (optional)'), due, h('span', { class: 'hint' }, 'After this time students can still look at their work but cannot change it.')), err),
-      actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), h('button', { class: 'btn primary', onclick: async () => {
-        const s = start.value ? new Date(start.value).toISOString() : null, d = due.value ? new Date(due.value).toISOString() : null;
-        if (s && d && new Date(d) <= new Date(s)) { err.textContent = 'The due time must be after the start time.'; return; }
-        const { error } = await this.sb.from('boards').update({ starts_at: s, due_at: d }).eq('id', b.id);
-        if (error) { err.textContent = friendlyError(error); return; }
-        b.starts_at = s; b.due_at = d; this.renderHeader(); m.close(); toast('Saved.', 'ok');
-      } }, 'Save')],
-    });
-  }
+  datesDialog() { scheduleDialog({ sb: this.sb, board: this.store.board, onSaved: () => this.renderHeader() }); }
 
   exportClass() {
     const ps = this.people();

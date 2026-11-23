@@ -6,7 +6,7 @@ import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
 import { BoardView } from './board.js';
 import { ReviewView } from './review.js';
-import { createBoard, deleteBoard, deleteClass, sourceForm, renameBoardDialog } from './pages.js';
+import { createBoard, deleteBoard, deleteClass, sourceForm, renameBoardDialog, scheduleDialog, isScheduled, fmtWhen } from './pages.js';
 import { boardStudentsDialog, checklist } from './members.js';
 import { importLibraryDialog } from './library.js';
 import { appDialog, giveAppsDialog, giveToStudentsDialog, previewDialog, appThumb } from './shelf.js';
@@ -262,11 +262,12 @@ export class TeacherApp {
     return h('div', { class: 'board-row' + (b.mode === 'assignment' ? ' assign' : '') },
       h('div', null,
         h('button', { class: 'title', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title),
-        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
+        h('div', { class: 'meta' }, b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), b.mode === 'assignment' && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), isScheduled(b) ? h('span', { class: 'tag sched', title: 'Students cannot see it until then. You can.' }, 'Hidden until ' + fmtWhen(b.starts_at)) : null, h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
         this.whoLine(b), extra),
       h('div', { class: 'acts' }, sw,
         b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', onclick: () => boardStudentsDialog({ sb: this.sb, board: b, onSaved: async () => { await this.loadAll(); this.renderDashboard(); } }) }, 'Students') : null,
         h('button', { class: 'btn sm', onclick: async () => toast((await copyText(link)) ? 'Student link copied.' : 'Could not copy. Open the board and use Share.', 'ok') }, iconEl('copy', 18), 'Copy link'),
+        h('button', { class: 'btn sm' + (isScheduled(b) ? ' on' : ''), title: 'Choose when students can see it', onclick: () => scheduleDialog({ sb: this.sb, board: b, onSaved: () => this.refresh() }) }, iconEl('timer', 18), 'Schedule'),
         h('button', { class: 'btn sm', title: 'Change the name', onclick: () => renameBoardDialog({ sb: this.sb, board: b, onSaved: () => this.refresh() }) }, 'Rename'),
         h('button', { class: 'btn sm primary', onclick: () => { location.hash = '#/board/' + b.id; } }, 'Open'),
         h('button', { class: 'btn sm danger', 'aria-label': `Delete ${b.title}`, onclick: () => this.deleteBoardDialog(b) }, iconEl('trash', 18))));
@@ -755,7 +756,8 @@ export class TeacherApp {
     if (!forStudent) { clsSel.addEventListener('change', drawWho); drawWho(); }
     let mode = 'live';
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
-    const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Opens at (optional)'), startIn), h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
+    const startField = h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Students can see it from (optional)'), startIn, h('span', { class: 'hint' }, 'Leave empty to show it now. Until that time students do not see it at all. You always see it.'));
+    const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
     const modeHint = h('span', { class: 'hint' });
     const modeSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Type of board' });
     const drawMode = () => {
@@ -773,7 +775,7 @@ export class TeacherApp {
       body: h('div', null,
         h('div', { class: 'field' }, h('label', { for: 'bt' }, forStudent ? 'Name of the work' : 'Board name'), title),
         forStudent ? h('p', { class: 'hint', style: { marginBottom: '10px' } }, `Only ${forStudent.first_name} sees this. It appears on their page as NEW.`) : [h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox],
-        h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), dates,
+        h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), startField, dates,
         form.el, bar, msg, err),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
     });
@@ -785,8 +787,9 @@ export class TeacherApp {
       go.disabled = true; bar.hidden = false;
       try {
         const s0 = startIn.value ? new Date(startIn.value).toISOString() : null, d0 = dueIn.value ? new Date(dueIn.value).toISOString() : null;
+        if (s0 && new Date(s0) <= new Date()) throw new Error('The start time has already passed. Leave it empty to show the board now, or choose a time in the future.');
         if (mode === 'assignment' && s0 && d0 && new Date(d0) <= new Date(s0)) throw new Error('The due time must be after the start time.');
-        const b = await createBoard(this.sb, { title: title.value.trim(), classId: forStudent ? null : clsSel.value, spec: form.spec(), mode, startsAt: mode === 'assignment' ? s0 : null, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
+        const b = await createBoard(this.sb, { title: title.value.trim(), classId: forStudent ? null : clsSel.value, spec: form.spec(), mode, startsAt: s0, dueAt: mode === 'assignment' ? d0 : null }, (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; });
         if (forStudent) {
           const { error } = await this.sb.from('board_students').insert({ board_id: b.id, student_id: forStudent.id });
           if (error) { await deleteBoard(this.sb, b.id).catch(() => {}); throw error; }

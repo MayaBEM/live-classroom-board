@@ -134,7 +134,10 @@ export async function startStudent(root, code) {
   if (!info.found) return page(h('h1', null, 'Board not found'), h('p', { class: 'lead' }, 'Check the link or the code your teacher sent. Letters and numbers must match.'));
   if (!info.enabled) return page(h('h1', null, info.title), h('div', { class: 'notice' }, 'This board is closed right now. Ask your teacher to open it.'));
   const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  if (info.mode === 'assignment' && info.starts_at && new Date(info.starts_at) > Date.now()) return page(h('h1', null, info.title), h('div', { class: 'notice' }, `This assignment opens on ${when(info.starts_at)}. Come back then.`));
+  if (info.starts_at && new Date(info.starts_at) > Date.now()) {       // set to open later: nothing is shown yet, and this page opens it by itself at the time
+    setTimeout(() => { if (document.body.contains(root)) startStudent(root, code); }, Math.min(Math.max(Date.parse(info.starts_at) - Date.now() + 1500, 5000), 60000));
+    return page(h('h1', null, 'Not open yet'), h('div', { class: 'notice' }, `This opens on ${when(info.starts_at)}. Keep this page open: it starts by itself.`));
+  }
 
   const saveKey = `bem-join-${code}-${new URLSearchParams(location.search).get('slot') || ''}`;
   let saved = null; try { saved = JSON.parse(localStorage.getItem(saveKey) || 'null'); } catch (e) { /* ignore */ }

@@ -164,3 +164,57 @@ export function renameBoardDialog({ sb, board, onSaved }) {
   const m = modal({ title: 'Rename', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'rb-t' }, 'Name of the board or assignment'), input), err), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go] });
   setTimeout(() => input.select(), 60);
 }
+
+
+// ------------------------------------------------------------------ when can students see a board?
+export const toLocalInput = iso => { if (!iso) return ''; const d = new Date(iso), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+export const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+// a board that opens in the future is hidden from students (the teacher always sees it)
+export const isScheduled = b => !!(b && b.starts_at && new Date(b.starts_at) > Date.now());
+
+// Choose when students can see this board or assignment (and, for an assignment, when it is due).
+export function scheduleDialog({ sb, board, onSaved }) {
+  const asg = board.mode === 'assignment';
+  let when = isScheduled(board) ? 'later' : 'now';
+  const start = h('input', { class: 'input', id: 'sch-s', type: 'datetime-local', value: isScheduled(board) ? toLocalInput(board.starts_at) : '' });
+  const due = asg ? h('input', { class: 'input', id: 'sch-d', type: 'datetime-local', value: toLocalInput(board.due_at) }) : null;
+  const err = h('p', { class: 'error', role: 'alert' });
+  const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'When students can see it' });
+  const later = h('div', null);
+  const at = (days, hh, mm = 0) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(hh, mm, 0, 0); return d; };
+  const nextMonday = () => { const d = new Date(), add = ((8 - d.getDay()) % 7) || 7; return at(add, 8); };
+  const quick = [['In 1 hour', () => new Date(Date.now() + 3600e3)], ['Tomorrow 8:00', () => at(1, 8)], ['Next Monday 8:00', nextMonday]];
+  const draw = () => {
+    seg.replaceChildren(...[['now', 'Students see it now'], ['later', 'From a set time']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(when === k), onclick: () => { when = k; if (k === 'later' && !start.value) start.value = toLocalInput(at(1, 8)); draw(); } }, label)));
+    later.hidden = when !== 'later';
+  };
+  later.append(
+    h('div', { class: 'field' }, h('label', { for: 'sch-s' }, 'Students can see it from'), start,
+      h('div', { class: 'chip-row', style: { marginTop: '8px' } }, quick.map(([label, fn]) => h('button', { type: 'button', class: 'chip', onclick: () => { start.value = toLocalInput(fn()); when = 'later'; draw(); } }, label)))),
+    h('p', { class: 'hint' }, 'Until then students do not see it at all, not on their page and not by its link. You always see everything. It shows up by itself at that time.'));
+  draw();
+  const go = h('button', { class: 'btn primary' }, 'Save');
+  const m = modal({
+    title: `When can students see "${board.title}"?`,
+    body: h('div', null, seg, later, due ? h('div', { class: 'field', style: { marginTop: '12px' } }, h('label', { for: 'sch-d' }, 'Due at (optional)'), due, h('span', { class: 'hint' }, 'After this time students can still look at their work but cannot change it.')) : null, err),
+    actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
+  });
+  go.addEventListener('click', async () => {
+    err.textContent = '';
+    let s = null;
+    if (when === 'later') {
+      if (!start.value) { err.textContent = 'Choose the date and time.'; start.focus(); return; }
+      s = new Date(start.value).toISOString();
+      if (new Date(s) <= new Date()) { err.textContent = 'That time has already passed. Choose a time in the future, or choose "Students see it now".'; return; }
+    }
+    const d = due && due.value ? new Date(due.value).toISOString() : null;
+    if (asg && d && new Date(d) <= new Date(s || Date.now())) { err.textContent = 'The due time must be after the time students can see it.'; return; }
+    go.disabled = true;
+    const row = asg ? { starts_at: s, due_at: d } : { starts_at: s };
+    const { error } = await sb.from('boards').update(row).eq('id', board.id);
+    if (error) { err.textContent = friendlyError(error); go.disabled = false; return; }
+    Object.assign(board, row); m.close();
+    toast(s ? `Hidden from students until ${fmtWhen(s)}.` : 'Students can see it now.', 'ok');
+    if (onSaved) onSaved(board);
+  });
+}
