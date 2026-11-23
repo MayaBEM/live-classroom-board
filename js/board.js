@@ -154,8 +154,9 @@ export class BoardView {
         this.elStatus);
       this.elStudentTag = h('span', { class: 'tag' });
       this.btnScore = h('button', { class: 'btn sm primary', onclick: () => this.scoreDialog() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Score and comment'));
+      this.btnChecked = h('button', { class: 'btn sm', onclick: () => this.toggleChecked() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Mark as checked'));
       this.btnExport = tb('file', 'Export PDF', () => this.exportThis());
-      Rt.push(this.elStudentTag, this.btnScore, this.btnExport, this.btnPages);
+      Rt.push(this.elStudentTag, this.btnScore, this.btnChecked, this.btnExport, this.btnPages);
     } else if (this.copy) {
       this.elDueTag = h('span', { class: 'tag', hidden: true });
       this.elScoreTag = h('span', { class: 'tag', hidden: true });
@@ -218,6 +219,10 @@ export class BoardView {
       this.elStudentTag.className = 'tag' + (p.submitted_at ? '' : ' warn');
       this.elStudentTag.textContent = p.submitted_at ? `Submitted ${fmtWhen(p.submitted_at)}` : (online ? 'Working now' : 'Not submitted');
       this.btnScore.querySelector('.lbl').textContent = p.score ? `Score ${p.score}` : 'Score and comment';
+      const ck = !!p.checked_at;
+      this.btnChecked.classList.toggle('on', ck); this.btnChecked.disabled = !p.submitted_at && !ck;
+      this.btnChecked.querySelector('.lbl').textContent = ck ? 'Checked' : 'Mark as checked';
+      this.btnChecked.title = ck ? 'The student was told. Tap to take the mark off.' : p.submitted_at ? 'Tell the student you checked their work. They see it on their page.' : 'The student has not submitted yet.';
     } else if (this.copy) {
       const me = this.store.me || {}, why = this.lockReason();
       const names = { submitted: 'Submitted', locked: 'Writing is locked', pastdue: 'Past due', notstarted: 'Not open yet' };
@@ -270,7 +275,8 @@ export class BoardView {
   onMe() {
     const me = this.store.me || {}, prev = this.prevMe || {};
     if (this.prevMe && ((me.score && me.score !== prev.score) || (me.comment && me.comment !== prev.comment))) toast('Your teacher added feedback.', 'ok');
-    this.prevMe = { score: me.score, comment: me.comment };
+    if (this.prevMe && me.checked_at && me.checked_at !== prev.checked_at) toast('Your teacher checked your work!', 'ok');
+    this.prevMe = { score: me.score, comment: me.comment, checked_at: me.checked_at };
     this.renderRail(); this.renderOpts(); this.updateTopState();
   }
 
@@ -286,6 +292,15 @@ export class BoardView {
   }
 
   // ---- assignment: teacher side (one student's copy)
+  async toggleChecked() {
+    const id = this.store.scopeId, p = this.store.participantsMap.get(id); if (!p) return;
+    const val = p.checked_at ? null : new Date().toISOString();
+    this.btnChecked.disabled = true;
+    const { error } = await this.sb.from('participants').update({ checked_at: val }).eq('id', id);
+    if (error) { this.btnChecked.disabled = false; return toast(friendlyError(error), 'bad'); }
+    p.checked_at = val; this.store.participantsMap.set(id, p); this.store.emit('participants'); this.updateTopState();
+    toast(val ? `${p.name} will see that you checked their work.` : 'The checked mark was taken off.', 'ok');
+  }
   scoreDialog() {
     const id = this.store.scopeId, p = this.store.participantsMap.get(id) || {};
     const score = h('input', { class: 'input', id: 'sc', value: p.score || '', maxlength: '24', placeholder: 'Example: 18/20 or A' });
@@ -297,7 +312,7 @@ export class BoardView {
       Object.assign(p, obj); this.store.participantsMap.set(id, p); this.store.emit('participants'); this.updateTopState(); if (msg) toast(msg, 'ok'); return true;
     };
     const extra = [];
-    if (p.submitted_at) extra.push(h('button', { class: 'btn sm', onclick: async () => { if (await patch({ submitted_at: null }, `${p.name} can edit again.`)) m.close(); } }, 'Let student edit again (undo Submit)'));
+    if (p.submitted_at) extra.push(h('button', { class: 'btn sm', onclick: async () => { if (await patch({ submitted_at: null, checked_at: null }, `${p.name} can edit again.`)) m.close(); } }, 'Let student edit again (undo Submit)'));
     extra.push(h('button', { class: 'btn sm danger', onclick: async () => {
       m.close();
       const ok = await confirmDialog({ title: `Delete ${p.name}?`, text: `${p.name} and all of their writing and your feedback on their copy will be deleted. This cannot be undone.`, confirmLabel: 'Delete student', danger: true });

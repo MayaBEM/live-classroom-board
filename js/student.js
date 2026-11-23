@@ -1,6 +1,6 @@
 // Student side: open the link, tap your name, type the 4-number code from your teacher, join the board.
 // (A board without a class list asks the student to type a first name instead, with an optional PIN.)
-import { h, toast } from './util.js';
+import { h, toast, modal } from './util.js';
 import { makeClient, friendlyError } from './db.js';
 import { Store } from './store.js';
 import { BoardView } from './board.js';
@@ -42,6 +42,19 @@ const dueSort = (a, b) => {
   return (b.status === 'new' && b.code ? 1 : 0) - (a.status === 'new' && a.code ? 1 : 0);
 };
 // "Teacher Maya" on every student page, so it is clear who is teaching
+// The teacher pressed "Mark as checked": the student is told once, with a pop-up and a NEW mark on the card (no sound).
+const checkedMs = b => (b.status === 'checked' && b.checked_at) ? Date.parse(b.checked_at) : 0;
+const checkedNews = (boards, key) => { let seen = 0; try { seen = Number(localStorage.getItem(key) || 0); } catch (e) { /* ignore */ } return boards.filter(b => checkedMs(b) > seen); };
+function checkedPopup(news, key) {
+  if (!news.length) return;
+  const mark = () => { try { localStorage.setItem(key, String(Math.max(...news.map(checkedMs)))); } catch (e) { /* ignore */ } };
+  const m = modal({
+    title: `Teacher ${CONFIG.TEACHER_NAME || ''} checked your work!`,
+    body: h('div', { class: 'checked-pop' }, news.map(b => h('p', { class: 'cp-row' }, h('b', null, b.title), b.score ? h('span', { class: 'cp-score' }, `Score ${b.score}`) : null))),
+    actions: [h('button', { class: 'btn primary big', onclick: () => m.close() }, 'OK')],
+    onClose: mark,
+  });
+}
 const teacherTag = () => h('p', { class: 'teacher-tag' }, h('b', null, 'Teacher ' + (CONFIG.TEACHER_NAME || '')));
 
 // the "Games and apps" shelf on a student's page: tiles that open the teacher's web apps in a new tab.
@@ -266,17 +279,20 @@ export async function startClass(root, classCode) {
 
   const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
+  let classPoll = null;
   function showBoards(data, name, pin) {
-    const refresh = async () => { const r = await portal(name, pin); if (r.data) showBoards(r.data, name, pin); };
+    clearInterval(classPoll);
+    const refresh = async () => { clearInterval(classPoll); const r = await portal(name, pin); if (r.data) showBoards(r.data, name, pin); };
+    const newsKey = `bem-checked-class-${classCode}-${name}`, news = checkedNews(data.boards, newsKey);
     const card = b => {
-      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code;
-      return h('div', { class: 'bcard ' + cls },
-        h('div', { class: 'bc-main' }, h('b', null, b.title),
+      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b);
+      return h('div', { class: 'bcard ' + cls + (isNews ? ' is-new' : '') },
+        h('div', { class: 'bc-main' }, h('b', null, isNews ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
           h('div', { class: 'bc-meta' }, h('span', { class: 'tag ' + (b.mode === 'assignment' ? 'assign' : 'live') }, b.mode === 'assignment' ? 'Assignment' : 'Live class'),
             b.due_at ? h('span', null, 'Due ' + when(b.due_at)) : null, (() => { const d = dueInfo(b.due_at, b.status); return d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null; })(), b.starts_at && locked ? h('span', null, 'Opens ' + when(b.starts_at)) : null),
           h('span', { class: 'bc-status' }, label + (b.status === 'checked' && b.score ? ` · Score ${b.score}` : ''))),
         h('button', { class: 'btn big' + (b.status === 'sent' || b.status === 'checked' ? '' : ' primary'), disabled: locked, onclick: async e => {
-          const btn = e.currentTarget; btn.disabled = true;
+          const btn = e.currentTarget; btn.disabled = true; clearInterval(classPoll);
           const r = await enterBoard({ sb, root, code: b.code, name, pin, onBack: refresh });
           if (r) { btn.disabled = false; toast(r.text, 'bad'); }
         } }, locked ? 'Not open yet' : b.status === 'sent' || b.status === 'checked' ? 'Look' : 'Open'));
@@ -291,6 +307,10 @@ export async function startClass(root, classCode) {
           todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
           done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
           h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')))));
+    checkedPopup(news, newsKey);
+    // the page notices by itself when the teacher checks something (a quiet look once a minute)
+    const sig = d => JSON.stringify(d.boards.map(x => [x.id, x.status, x.checked_at, x.score, x.code ? 1 : 0, x.title, x.due_at])), base = sig(data);
+    classPoll = setInterval(async () => { if (document.hidden) return; const r = await portal(name, pin); if (r.data && sig(r.data) !== base) { clearInterval(classPoll); showBoards(r.data, name, pin); } }, 60000);
   }
 
   if (saved && saved.name && saved.pin) { const r = await portal(saved.name, saved.pin); if (r.data) return showBoards(r.data, saved.name, saved.pin); forget(); }
@@ -353,8 +373,8 @@ export async function startMe(root, pageCode) {
   const when = iso => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
   // ---- the small idea board in the top right corner: write or draw anything, it saves by itself
-  let ideaTimer = null, ideaPoll = null, ideaFlush = null;
-  const stopIdea = () => { clearInterval(ideaPoll); clearTimeout(ideaTimer); ideaPoll = null; if (ideaFlush) { ideaFlush(); ideaFlush = null; } };
+  let ideaTimer = null, ideaPoll = null, ideaFlush = null, boardsPoll = null;
+  const stopIdea = () => { clearInterval(boardsPoll); clearInterval(ideaPoll); clearTimeout(ideaTimer); ideaPoll = null; if (ideaFlush) { ideaFlush(); ideaFlush = null; } };
   function ideaPanel(idea, pin) {
     idea = idea || { strokes: [], tstrokes: [], reply: null, reply_at: null };
     const seenKey = `bem-idea-seen-${pageCode}`;
@@ -403,8 +423,9 @@ export async function startMe(root, pageCode) {
   function showBoards(data, pin) {
     stopIdea();
     const refresh = async () => { stopIdea(); const r = await portal(pin); if (r.data) showBoards(r.data, pin); };
+    const newsKey = `bem-checked-${pageCode}`, news = checkedNews(data.boards, newsKey);
     const card = b => {
-      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, fresh = b.status === 'new' && !locked;
+      const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code, isNews = news.includes(b), fresh = (b.status === 'new' && !locked) || isNews;
       return h('div', { class: 'bcard ' + cls + (fresh ? ' is-new' : '') },
         h('div', { class: 'bc-main' },
           h('b', null, fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, b.title),
@@ -433,6 +454,10 @@ export async function startMe(root, pageCode) {
         todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'blist' }, todo.map(card)),
         done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'blist' }, done.map(card)),
         h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
+    checkedPopup(news, newsKey);
+    // the page notices by itself when the teacher checks something (a quiet look once a minute; the idea board is saved first)
+    const sig = d => JSON.stringify(d.boards.map(x => [x.id, x.status, x.checked_at, x.score, x.code ? 1 : 0, x.title, x.due_at])), base = sig(data);
+    boardsPoll = setInterval(async () => { if (document.hidden) return; const r = await portal(pin); if (r.data && sig(r.data) !== base) { stopIdea(); showBoards(r.data, pin); } }, 60000);
   }
 
   if (savedPin) { const r = await portal(savedPin); if (r.data) return showBoards(r.data, savedPin); forget(); }

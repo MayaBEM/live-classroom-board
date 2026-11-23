@@ -142,7 +142,7 @@ export class ReviewView {
     c.name.textContent = p.name;
     const sub = !!p.submitted_at, on = this.isOnline(p);
     c.state.className = 'rv-state ' + (sub ? 'sub' : on ? 'on' : '');
-    c.state.textContent = sub ? 'Submitted' : on ? 'Working' : 'Not submitted';
+    c.state.textContent = sub ? (p.checked_at ? 'Checked ✓' : 'Submitted') : on ? 'Working' : 'Not submitted';
     c.score.hidden = !p.score; c.score.textContent = p.score ? `Score ${p.score}` : '';
     const pg = this.pageFor(p); const idx = pg ? this.store.pages.indexOf(pg) + 1 : 0;
     c.pg.textContent = pg ? `Page ${idx}` : '';

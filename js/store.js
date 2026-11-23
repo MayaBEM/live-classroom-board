@@ -53,7 +53,7 @@ export class Store {
 
   // teacher: every participant of the board. student: only their own row ("me": score, comment, submitted).
   async loadPeople() {
-    let q = this.sb.from('participants').select('id,name,last_seen,created_at,submitted_at,score,comment,cur_page,reclaim_ok,user_id').eq('board_id', this.boardId);
+    let q = this.sb.from('participants').select('id,name,last_seen,created_at,submitted_at,score,comment,checked_at,cur_page,reclaim_ok,user_id').eq('board_id', this.boardId);
     if (this.role === 'student') q = q.eq('id', this.participantId);
     const { data, error } = await q;
     if (error) return;

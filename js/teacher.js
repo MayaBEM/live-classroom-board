@@ -393,12 +393,12 @@ export class TeacherApp {
     const work = h('section', { class: 'sheet-panel' },
       h('header', null, h('h2', null, `Work for ${m.first_name}`), h('button', { class: 'btn primary', onclick: () => this.newBoardDialog({ forStudent: m }) }, iconEl('plus', 18), 'Add work')),
       mine.length ? mine.map(row) : h('div', { class: 'empty' }, h('b', null, 'No work yet. '), `Press Add work, then upload a worksheet or start with a blank page. ${m.first_name} sees it as NEW.`));
-    if (ids.length) this.sb.from('participants').select('board_id,name,submitted_at,score,comment').in('board_id', ids).then(({ data }) => {
+    if (ids.length) this.sb.from('participants').select('board_id,name,submitted_at,score,comment,checked_at').in('board_id', ids).then(({ data }) => {
       const mp = new Map((data || []).filter(p => p.name.toLowerCase() === m.first_name.toLowerCase()).map(p => [p.board_id, p]));
       ids.forEach(id => {
         const p = mp.get(id), slot = slots.get(id); if (!slot) return;
         let cls2 = 'new', txt = 'Not started';
-        if (p) { if (p.submitted_at && (p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent. Waiting for you to check'; } else { cls2 = 'working'; txt = 'Working'; } }
+        if (p) { if (p.submitted_at && (p.checked_at || p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent. Waiting for you to check'; } else { cls2 = 'working'; txt = 'Working'; } }
         slot.append(h('button', { class: 'pg-chip ' + cls2, onclick: () => { location.hash = '#/board/' + id; } }, txt));
       });
     });
@@ -603,7 +603,7 @@ export class TeacherApp {
     if (!boards.length || !mine.length) return null;
     const host = h('div', { class: 'progress-wrap' }, h('p', { class: 'empty' }, 'Loading…'));
     const panel = h('section', { class: 'sheet-panel' }, h('header', null, h('h2', null, 'Who has done what')), host);
-    this.sb.from('participants').select('board_id,name,submitted_at,score,comment').in('board_id', boards.map(b => b.id)).then(({ data, error }) => {
+    this.sb.from('participants').select('board_id,name,submitted_at,score,comment,checked_at').in('board_id', boards.map(b => b.id)).then(({ data, error }) => {
       if (error) { host.replaceChildren(h('p', { class: 'empty' }, friendlyError(error))); return; }
       const key = (b, n) => b + '|' + n.toLowerCase(), by = new Map((data || []).map(p => [key(p.board_id, p.name), p]));
       const cell = (b, s) => {
@@ -611,7 +611,7 @@ export class TeacherApp {
         if (only && only.size && !only.has(s.student_id)) return h('td', null, h('span', { class: 'pg-na', title: `${s.first_name} is not in this board` }, '–'));
         const p = by.get(key(b.id, s.first_name));
         let cls2 = 'new', txt = 'Not started';
-        if (p) { if (p.submitted_at && (p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent'; } else { cls2 = 'working'; txt = 'Working'; } }
+        if (p) { if (p.submitted_at && (p.checked_at || p.score || p.comment)) { cls2 = 'checked'; txt = p.score ? `Score ${p.score}` : 'Checked'; } else if (p.submitted_at) { cls2 = 'sent'; txt = 'Sent'; } else { cls2 = 'working'; txt = 'Working'; } }
         return h('td', null, h('button', { class: 'pg-chip ' + cls2, title: `${s.first_name}: ${b.title}`, onclick: () => { location.hash = '#/board/' + b.id; } }, txt));
       };
       host.replaceChildren(h('div', { class: 'tbl-scroll' }, h('table', { class: 'prog' },

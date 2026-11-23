@@ -852,3 +852,8 @@ input, textarea, select { font-size: max(16px, 1em); }
 .ib.dot.custom { position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; font-size: 16px; font-weight: 700; line-height: 1; border: 1px dashed var(--ink); cursor: pointer; overflow: hidden; background: var(--c, #fff); }
 .ib.dot.custom[aria-pressed="true"] { border-style: solid; color: #fff; text-shadow: 0 0 2px #000; }
 .ib.dot.custom .sw-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+
+/* ---- "Teacher checked your work" pop-up */
+.checked-pop { display: flex; flex-direction: column; gap: 10px; }
+.cp-row { margin: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; background: var(--paper-2); border-left: 6px solid var(--ok); font-size: 17px; }
+.cp-score { font-weight: 700; color: var(--ok); white-space: nowrap; }
