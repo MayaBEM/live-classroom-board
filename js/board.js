@@ -66,6 +66,7 @@ export class BoardView {
     this.buildUI();
     const st = this.store;
     this.instr.attach(this.overlay);
+    if (this.isTeacher && !this.assign && !this.review) setTimeout(() => this.syncInstrShare(), 300);
     this.timerCtl = new TimerController({ store: st, sb: this.sb, isTeacher: this.isTeacher });
     this.renderTop(); this.renderRail(); this.renderOpts(); this.placePop();
     this.ro2 = new ResizeObserver(() => this.placePop()); this.ro2.observe(this.elTop);
@@ -171,7 +172,9 @@ export class BoardView {
       this.btnScore = h('button', { class: 'btn sm primary', onclick: () => this.scoreDialog() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Score and comment'));
       this.btnChecked = h('button', { class: 'btn sm', onclick: () => this.toggleChecked() }, iconEl('check', 18), h('span', { class: 'lbl' }, 'Mark as checked'));
       this.btnExport = tb('file', 'Export PDF', () => this.exportThis());
-      Rt.push(this.elStudentTag, this.btnScore, this.btnChecked, this.btnExport, this.btnPages);
+      this.btnPriv = h('button', { class: 'tbtn priv', onclick: () => this.setPrivate(!this.privateMode) });
+      this.elPrivTag = h('span', { class: 'tag warn', hidden: true }, 'Private');
+      Rt.push(this.elStudentTag, this.elPrivTag, this.btnPriv, this.btnScore, this.btnChecked, this.btnExport, this.btnPages);
     } else if (this.copy) {
       this.elDueTag = h('span', { class: 'tag', hidden: true });
       this.elScoreTag = h('span', { class: 'tag', hidden: true });
@@ -199,7 +202,9 @@ export class BoardView {
         this.btnShare = tb('share', 'Share with students', () => this.shareDialog());
         this.btnPeople = h('button', { class: 'tbtn', title: 'People', 'aria-label': 'People', onclick: () => this.togglePanel('people') }, iconEl('people', 22), h('b', { class: 'cnt' }, '0'));
         this.btnTimer = tb('timer', 'Class timer', () => this.timerCtl.dialog());
-        Rt.push(this.btnFollow, this.btnLock, this.btnClear, h('span', { class: 'tsep' }), this.btnPeople, this.btnTimer, this.btnShare);
+        this.btnPriv = h('button', { class: 'tbtn priv', onclick: () => this.setPrivate(!this.privateMode) });
+        this.elPrivTag = h('span', { class: 'tag warn', hidden: true }, 'Private');
+        Rt.push(this.elPrivTag, this.btnPriv, this.btnFollow, this.btnLock, this.btnClear, h('span', { class: 'tsep' }), this.btnPeople, this.btnTimer, this.btnShare);
       }
       Rt.push(this.btnPages);
     }
@@ -207,7 +212,7 @@ export class BoardView {
     L.splice(L.indexOf(this.elStatus) + 1, 0, this.timerCtl.el);
     this.tbLeft.replaceChildren(...L); this.tbRight.replaceChildren(...Rt);
     this.renderStatus(st.sync);
-    this.updateTopState();
+    this.updateTopState(); this.renderPrivBtn();
   }
 
   exitBoard() { this.destroy(); if (this.onBack) this.onBack(); }
@@ -381,7 +386,6 @@ export class BoardView {
     for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler']]) {
       items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(!!this.instr.local[k]), title: label + ' (show or hide)', 'aria-label': label, onclick: () => { this.instr.toggle(k); this.renderRail(); this.renderOpts(); } }, iconEl(k, 22)));
     }
-    if (this.isTeacher && !this.assign && this.instr.any()) items.push(h('button', { class: 'tbtn' + (this.instr.sharing ? ' on' : ''), 'aria-pressed': String(this.instr.sharing), title: this.instr.sharing ? 'The class sees your instruments. Tap to hide' : 'Show my protractor and ruler to the class', 'aria-label': 'Show my instruments to the class', onclick: () => this.toggleShareInstr() }, iconEl('eye', 22)));
     const only = pencil.only;
     items.push(h('span', { class: 'tsep' }), h('button', { class: 'tbtn pencil-only', 'aria-pressed': String(only), title: only ? 'Pencil only is ON: fingers move and zoom the page, they do not write. Tap to let fingers write' : 'Pencil only is OFF: fingers can write. Tap to write with the pencil only', 'aria-label': only ? 'Pencil only is on. Tap to let fingers write' : 'Pencil only is off. Tap to write with the pencil only', onclick: () => pencil.toggle() }, iconEl('hand', 22)));
     this.elRail.replaceChildren(...items);
@@ -664,12 +668,36 @@ export class BoardView {
     if (!this._si) this._si = throttle(s => this.store.sendInstr(s), 60);
     this._si(state);
   }
-  toggleShareInstr() {
-    const on = this.instr.sharing = !this.instr.sharing;
-    clearInterval(this.shareTimer);
-    if (on) { this.store.sendInstr(this.instr.shared()); this.shareTimer = setInterval(() => this.store.sendInstr(this.instr.shared()), 4000); toast('Students now see your protractor and ruler.'); }
-    else { this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null }); toast('Students no longer see them.'); }
-    this.renderRail();
+  // the protractor and ruler are shown to the class whenever "students can see me" is on
+  syncInstrShare() {
+    if (!(this.isTeacher && !this.assign && !this.review)) return;
+    const on = !this.privateMode; this.instr.sharing = on; clearInterval(this.shareTimer);
+    if (on) { this.store.sendInstr(this.instr.shared()); this.shareTimer = setInterval(() => { if (!this.privateMode) this.store.sendInstr(this.instr.shared()); }, 4000); }
+    else this.store.sendInstr({ page: this.pageId, protractor: null, ruler: null });
+  }
+  // ---- the teacher works in private (nothing she writes, draws, places or points at is seen by the students) or in the open
+  renderPrivBtn() {
+    if (!this.btnPriv) return;
+    const priv = !!this.privateMode, n = this.store.hiddenIds().length;
+    this.btnPriv.setAttribute('aria-pressed', String(priv));
+    this.btnPriv.classList.toggle('on', priv);
+    this.btnPriv.replaceChildren(iconEl(priv ? 'eyeoff' : 'eye', 22), h('span', { class: 'lbl' }, priv ? 'Private' : 'Students see'));
+    const why = priv ? `Private: students cannot see what you write or do${n ? ` (${n} private mark${n === 1 ? '' : 's'})` : ''}. Tap to let them see.` : 'Students see everything you write, draw, place and point at. Tap to work in private.';
+    this.btnPriv.title = why; this.btnPriv.setAttribute('aria-label', why);
+    if (this.elPrivTag) { this.elPrivTag.hidden = !priv; }
+  }
+  async setPrivate(on) {
+    if (!this.isTeacher) return;
+    this.commitEditor(); this.privateMode = this.store.privateMode = on;
+    this.syncInstrShare(); this.renderPrivBtn();
+    if (on) { toast('Private: students cannot see what you do now.', 'ok'); return; }
+    const n = this.store.hiddenIds().length;
+    if (n) {
+      const ok = await confirmDialog({ title: 'Show your private work to the students?', text: `You made ${n} mark${n === 1 ? '' : 's'} while students could not see. Show ${n === 1 ? 'it' : 'them'} now?`, confirmLabel: 'Show to students' });
+      if (ok) { try { await this.store.publishHidden(); toast('Students can see it now.', 'ok'); } catch (e) { toast(friendlyError(e), 'bad'); } }
+      else toast('They stay private. Students see what you do from now on.', 'ok');
+    } else toast('Students can see what you do.', 'ok');
+    this.renderPrivBtn();
   }
 
   // ===================================================================== rendering

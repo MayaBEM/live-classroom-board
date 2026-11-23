@@ -548,8 +548,8 @@ input[type=file]::file-selector-button { border: 2px solid var(--ink); backgroun
 
 .tbtn { width: 38px; height: 40px; }
 @media (min-width: 1500px) { .tbtn { width: 42px; height: 42px; } }
-/* the tools sit on their own row whenever the one-row bar would not fit (the teacher bar needs about 1340px: iPad sideways, small laptops) */
-@media (max-width: 1339px) {
+/* the tools sit on their own row whenever the one-row bar would not fit (the teacher bar needs about 1700px when she is working in private: iPad sideways, laptops) */
+@media (max-width: 1699px) {
   .b-top { flex-wrap: wrap; padding: 4px 8px 6px; gap: 4px 6px; min-height: 0; }
   .tb-left { flex: 0 1 auto; }
   .tb-right { flex: 1 1 0; justify-content: flex-end; }
@@ -941,3 +941,11 @@ input, textarea, select { font-size: max(16px, 1em); }
 .wd-row:disabled { opacity: .55; cursor: default; }
 .wd-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .wd-row.st-new { border-left-color: var(--orange); } .wd-row.st-working { border-left-color: var(--sky-deep); } .wd-row.st-sent { border-left-color: var(--ok); } .wd-row.st-checked { border-left-color: var(--mint-deep); } .wd-row.st-live { border-left-color: var(--teal); }
+
+/* ---- "Students see" / "Private" switch (teacher) */
+.tbtn.priv { width: auto; min-width: 42px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; }
+.tbtn.priv .lbl { display: inline; font-size: 14px; font-weight: 600; }
+.tbtn.priv.on { background: var(--orange); color: var(--ink); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+@media (max-width: 1699px) { .tbtn.priv .lbl { display: none; } }
+.b-pop { flex-wrap: wrap; justify-content: center; row-gap: 8px; }
+.b-pop .grp.wrap { flex: 0 1 auto; max-width: 100%; }

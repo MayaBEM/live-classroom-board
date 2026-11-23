@@ -6,7 +6,7 @@ import { uuid, debounce, sleep } from './util.js';
 
 const SAVE_AFTER = 3000, SAVE_MAX = 8000;   // ms
 
-const rowOf = o => ({ id: o.id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, type: o.type, data: o.data, deleted: !!o.deleted, created_at: o.created_at });
+const rowOf = o => ({ id: o.id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, hidden_from_students: !!o.hidden_from_students, type: o.type, data: o.data, deleted: !!o.deleted, created_at: o.created_at });
 const norm = r => ({ ...r, t: Date.parse(r.created_at) || Date.now(), _b: null });
 
 export class Store {
@@ -18,7 +18,7 @@ export class Store {
     this.outboxKey = `bem-outbox-${boardId}-${participantId || 'teacher'}`;
     this.persistSoon = debounce(() => this.persist(), 500);   // (the local copy of unsaved work is written in the pauses, not after every stroke)
     this.timers = [];
-    this.clockOffset = 0; this.scopeId = null; this.mode = 'live'; this.participantsMap = new Map(); this.me = null; this.curPage = null; this.liveCh = null;
+    this.clockOffset = 0; this.privateMode = false; this.scopeId = null; this.mode = 'live'; this.participantsMap = new Map(); this.me = null; this.curPage = null; this.liveCh = null;
   }
 
   on(evt, fn) { (this.listeners[evt] ||= []).push(fn); return () => { this.listeners[evt] = this.listeners[evt].filter(f => f !== fn); }; }
@@ -228,8 +228,9 @@ export class Store {
     this.presence = p;
     if (this.liveReady) this.live.track(p).catch(() => {});
   }
-  sendLive(payload) { if (this.liveReady) this.live.send({ type: 'broadcast', event: 'live', payload }).catch(() => {}); }
-  sendLaser(payload) { this.tch.send({ type: 'broadcast', event: 'laser', payload }).catch(() => {}); }
+  // while the teacher works in private nothing is sent to the students, not even the lines being drawn or the laser
+  sendLive(payload) { if (this.privateMode) return; if (this.liveReady) this.live.send({ type: 'broadcast', event: 'live', payload }).catch(() => {}); }
+  sendLaser(payload) { if (this.privateMode) return; this.tch.send({ type: 'broadcast', event: 'laser', payload }).catch(() => {}); }
   sendView(payload) { this.tch.send({ type: 'broadcast', event: 'view', payload }).catch(() => {}); }
   sendInstr(payload) { this.tch.send({ type: 'broadcast', event: 'instr', payload }).catch(() => {}); }
     sendResync() { this.tch.send({ type: 'broadcast', event: 'resync', payload: {} }).catch(() => {}); }
@@ -252,7 +253,7 @@ export class Store {
     const o = norm({
       id, board_id: this.boardId, page_id: pageId, participant_id: teacher ? null : this.participantId,
       scope_id: assign ? (teacher ? this.scopeId : this.participantId) : null, is_feedback: assign && teacher,
-      author: this.name, type, data, deleted: false, created_at: new Date().toISOString(),
+      author: this.name, type, data, deleted: false, created_at: new Date().toISOString(), hidden_from_students: teacher && this.privateMode,
     });
     this.objs.set(id, o); this.invalidate(pageId); this.markDirty(id, 'full');
     return o;
@@ -260,9 +261,22 @@ export class Store {
   // a new object that takes the place of a piece of an old one (erasing part of a stroke): same writer, same copy, same time
   addLike(o, data) {
     const id = uuid();
-    const n = norm({ id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, author: o.author, type: o.type, data, deleted: false, created_at: o.created_at });
+    const n = norm({ id, board_id: o.board_id, page_id: o.page_id, participant_id: o.participant_id, scope_id: o.scope_id || null, is_feedback: !!o.is_feedback, hidden_from_students: !!o.hidden_from_students, author: o.author, type: o.type, data, deleted: false, created_at: o.created_at });
     this.objs.set(id, n); this.invalidate(o.page_id); this.markDirty(id, 'full');
     return n;
+  }
+  // marks the teacher made in private (students cannot see them until the teacher shows them)
+  hiddenIds() { const a = []; for (const o of this.objs.values()) if (o.hidden_from_students && !o.deleted) a.push(o.id); return a; }
+  async publishHidden() {
+    const ids = [...this.objs.values()].filter(o => o.hidden_from_students).map(o => o.id);
+    await this.flushNow();
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200), { error } = await this.sb.from('objects').update({ hidden_from_students: false }).in('id', chunk);
+      if (error) throw error;
+      for (const id of chunk) { const o = this.objs.get(id); if (o) o.hidden_from_students = false; }
+    }
+    this.sendResync();
+    return ids.length;
   }
   setDeleted(ids, val) {
     const pages = new Set();
