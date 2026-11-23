@@ -949,3 +949,17 @@ input, textarea, select { font-size: max(16px, 1em); }
 @media (max-width: 1699px) { .tbtn.priv .lbl { display: none; } }
 .b-pop { flex-wrap: wrap; justify-content: center; row-gap: 8px; }
 .b-pop .grp.wrap { flex: 0 1 auto; max-width: 100%; }
+
+/* ---- the sticker / tape / picture panels are exactly as big as what is in them */
+.b-pop { width: max-content; max-width: calc(100% - 16px); }
+.pop-col { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.pop-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pop-lbl { font-size: 14px; font-weight: 600; color: var(--ink-2); }
+.pop-col .note { text-align: center; font-size: 13px; white-space: normal; }
+.sticker-grid { display: grid; grid-template-columns: repeat(6, 54px); gap: 6px; justify-content: center; flex: none; max-width: none; }
+.tape-grid { display: grid; grid-template-columns: repeat(4, 80px); gap: 6px; justify-content: center; }
+.b-pop .grp.tapes { display: none; }
+@media (max-width: 420px) { .sticker-grid { grid-template-columns: repeat(5, 48px); } .stk { width: 48px; height: 48px; } .tape-grid { grid-template-columns: repeat(3, 80px); } }
+.pop-col { width: 354px; max-width: 100%; }
+.pop-row { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
+.pop-row .btn.sm { padding: 0 9px; }

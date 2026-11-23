@@ -55,7 +55,7 @@ export class BoardView {
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
     this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent();
-    this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
+    this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.popOpen = true; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
 
@@ -379,7 +379,7 @@ export class BoardView {
     items.push(this.btnUndo, this.btnRedo, h('span', { class: 'tsep' }));
     for (const [id, label, ic] of TOOLS) {
       if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.review)) continue;
-      items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(this.tool === id), disabled: !this.toolAllowed(id), 'data-tool': id, title: label, 'aria-label': label, onclick: () => this.setTool(id) }, iconEl(ic, 22)));
+      items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(this.tool === id), disabled: !this.toolAllowed(id), 'data-tool': id, title: label, 'aria-label': label, onclick: () => { if (id === this.tool && (id === 'sticker' || id === 'tape' || id === 'image')) { this.popOpen = !this.popOpen; this.renderOpts(); } else this.setTool(id); } }, iconEl(ic, 22)));
       if (id === 'move' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
     }
     items.push(h('span', { class: 'tsep' }));
@@ -398,7 +398,7 @@ export class BoardView {
     if (!this.toolAllowed(t)) return;
     this.commitEditor();
     const was = this.tool;
-    this.tool = t;
+    this.tool = t; this.popOpen = t !== 'image';       // (the picture tool opens the photo chooser instead of a panel)
     if (t !== 'image' && t !== 'sticker') this.imgSel = null;
     this.stage.classList.toggle('move', t === 'move'); this.stage.classList.toggle('erase', t === 'eraser');
     this.renderRail(); this.renderOpts();
@@ -440,22 +440,27 @@ export class BoardView {
         h('button', { class: 'btn sm' + (this.eraseMode === k ? ' on' : ''), 'aria-pressed': String(this.eraseMode === k), onclick: () => { this.eraseMode = k; try { localStorage.setItem('bem-erase-mode', k); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser size' }, sizes(i => { this.eraseSizeIdx = i; this.renderOpts(); }, this.eraseSizeIdx)));
     } else if (t === 'sticker') {
+      // the panel is as big as its contents, and folds away after a sticker is picked (tap the Stickers button again to bring it back)
       const grp = this.stickerGroup;
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Kind of sticker' }, STICKER_GROUPS.map(([k, label]) => h('button', { class: 'btn sm' + (grp === k ? ' on' : ''), 'aria-pressed': String(grp === k), onclick: () => { this.stickerGroup = k; this.renderOpts(); } }, label))));
-      kids.push(h('div', { class: 'sticker-grid', role: 'group', 'aria-label': 'Stickers' }, STICKERS.filter(s => s.group === grp).map(s => h('button', { class: 'stk', 'aria-label': s.name, title: s.name, 'aria-pressed': String(this.stickerKind === s.k), onclick: () => { this.stickerKind = s.k; this.renderOpts(); } }, stickerThumb(s.k)))));
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })), h('span', { class: 'note' }, 'Tap the page to put it there. Tap a sticker to move it or make it bigger.'));
+      kids.push(h('div', { class: 'pop-col' },
+        h('div', { class: 'pop-row' }, h('div', { class: 'grp', role: 'group', 'aria-label': 'Kind of sticker' }, STICKER_GROUPS.map(([k, label]) => h('button', { class: 'btn sm' + (grp === k ? ' on' : ''), 'aria-pressed': String(grp === k), onclick: () => { this.stickerGroup = k; this.renderOpts(); } }, label))),
+          h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); }))),
+        h('div', { class: 'sticker-grid', role: 'group', 'aria-label': 'Stickers' }, STICKERS.filter(s => s.group === grp).map(s => h('button', { class: 'stk', 'aria-label': s.name, title: s.name, 'aria-pressed': String(this.stickerKind === s.k), onclick: () => { this.stickerKind = s.k; this.popOpen = false; this.renderOpts(); } }, stickerThumb(s.k)))),
+        h('span', { class: 'note' }, 'Pick one, then tap the page.')));
     } else if (t === 'tape') {
-      kids.push(h('div', { class: 'grp tapes', role: 'group', 'aria-label': 'Tape' }, TAPES.map(([k, label]) => h('button', { class: 'tapebtn', 'aria-label': label, title: label, 'aria-pressed': String(this.tapeKind === k), onclick: () => { this.tapeKind = k; this.renderOpts(); } }, tapeThumb(k)))));
-      kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Width' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); })), h('span', { class: 'note' }, 'Press and drag: the tape gets longer as you drag. A tap makes a short piece.'));
+      kids.push(h('div', { class: 'pop-col' },
+        h('div', { class: 'pop-row' }, h('span', { class: 'pop-lbl' }, 'Width'), h('div', { class: 'grp', role: 'group', 'aria-label': 'Width' }, sizes(i => { this.sizeIdx = i; this.renderOpts(); }))),
+        h('div', { class: 'tape-grid', role: 'group', 'aria-label': 'Tape' }, TAPES.map(([k, label]) => h('button', { class: 'tapebtn', 'aria-label': label, title: label, 'aria-pressed': String(this.tapeKind === k), onclick: () => { this.tapeKind = k; this.popOpen = false; this.renderOpts(); } }, tapeThumb(k)))),
+        h('span', { class: 'note' }, 'Pick one, then drag on the page.')));
     } else if (t === 'image') {
-      kids.push(h('button', { class: 'btn primary sm', onclick: () => this.pickPicture() }, iconEl('image', 18), 'Add a picture'),
-        h('span', { class: 'note' }, 'Drag a picture to move it. Drag its corner to make it bigger or smaller. The eraser removes it.'));
+      kids.push(h('button', { class: 'btn primary sm', onclick: () => { this.popOpen = false; this.renderOpts(); this.pickPicture(); } }, iconEl('image', 18), 'Add a picture'),
+        h('span', { class: 'note' }, 'Drag a picture to move it, drag its corner to resize.'));
     } else {
       const notes = { eraser: 'Touch a mark to remove it. Undo brings it back.', laser: 'Move over the page: everyone sees a red dot.' };
       if (notes[t]) kids.push(h('span', { class: 'note' }, notes[t]));
     }
     if (this.editor) kids.push(h('button', { class: 'btn primary sm', onclick: () => this.commitEditor() }, iconEl('check', 18), 'Done'));
-    o.hidden = !kids.length;
+    o.hidden = !kids.length || (!this.popOpen && (t === 'sticker' || t === 'tape' || t === 'image'));       // these panels fold away until the tool button is tapped again
     o.replaceChildren(...kids);
     this.updateUndo(); this.updatePager();
   }
