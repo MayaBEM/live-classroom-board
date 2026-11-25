@@ -17,7 +17,7 @@ import { friendlyError } from './db.js';
 import { openAddPages, renameBoardDialog, PAGE_H } from './pages.js';
 
 const TOOLS = [
-  ['move', 'Move', 'move'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
+  ['move', 'Move', 'move'], ['select', 'Select and move things', 'select'], ['pen', 'Pen', 'pen'], ['highlighter', 'Highlight', 'highlighter'], ['text', 'Text', 'text'],
   ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow'], ['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'],
   ['image', 'Picture', 'image'], ['sticker', 'Stickers', 'sticker'], ['tape', 'Washi tape', 'tape'], ['stamp', 'Stamp', 'check'], ['eraser', 'Eraser', 'eraser'], ['laser', 'Laser', 'laser'],
 ];
@@ -39,6 +39,33 @@ const saveRecent = a => { try { localStorage.setItem('bem-custom-colors', JSON.s
 const OVER_TURN = 90;       // pixels pushed past the end of a page that turn it
 const MIN_S = 0.12, MAX_S = 8;
 
+// move or resize the numbers inside an object: fn(x, y) gives the new place of a point, k is the scale (1 when only moving)
+function mapData(type, d, fn, k) {
+  const n = { ...d };
+  if (type === 'pen' || type === 'highlighter') {
+    const st = d.pr ? 3 : 2, p = d.p.slice(); for (let i = 0; i < p.length; i += st) { const q = fn(p[i], p[i + 1]); p[i] = Math.round(q[0] * 20) / 20; p[i + 1] = Math.round(q[1] * 20) / 20; }
+    n.p = p; if (k !== 1) n.s = Math.max(1, Math.min(60, d.s * k));
+  } else if (type === 'image' || type === 'sticker') {
+    const q = fn(d.x, d.y); n.x = Math.round(q[0] * 10) / 10; n.y = Math.round(q[1] * 10) / 10; if (k !== 1) { n.w = Math.max(20, d.w * k); n.h = Math.max(20, d.h * k); }
+  } else if (type === 'text') {
+    const q = fn(d.x, d.y); n.x = Math.round(q[0] * 10) / 10; n.y = Math.round(q[1] * 10) / 10; if (k !== 1) { n.fs = Math.max(10, Math.min(300, d.fs * k)); n.w = Math.max(40, d.w * k); }
+  } else if (type === 'stamp') {
+    const q = fn(d.x, d.y); n.x = Math.round(q[0]); n.y = Math.round(q[1]); if (k !== 1) n.s = Math.max(20, d.s * k);
+  } else {                       // line, arrow, box, circle, washi tape
+    const a = fn(d.x0, d.y0), b = fn(d.x1, d.y1); n.x0 = Math.round(a[0] * 10) / 10; n.y0 = Math.round(a[1] * 10) / 10; n.x1 = Math.round(b[0] * 10) / 10; n.y1 = Math.round(b[1] * 10) / 10;
+    if (k !== 1) { if (type === 'tape') n.w = Math.max(10, (d.w || 44) * k); else n.s = Math.max(1, Math.min(60, d.s * k)); }
+  }
+  return n;
+}
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 export class BoardView {
   // embedded: the review screen owns the store; studentNav: { name, index, count, prev(), next(), back() } for a teacher looking at one student's copy
   constructor({ sb, store, role, root, onExit, code, embedded = false, renderer = null, studentNav = null, onBack = null, workPanel = null, onSwitch = null }) {
@@ -55,7 +82,7 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.recentColors = loadRecent();
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.sel = new Set(); this.selDrag = null; this.lasso = null; this.recentColors = loadRecent();
     this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.popOpen = true; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
@@ -125,6 +152,8 @@ export class BoardView {
     this.overlay = h('div', { class: 'overlay' });
     this.imgBox = h('div', { class: 'img-sel', hidden: true }, h('i', { class: 'img-handle' }));
     this.overlay.append(this.imgBox);
+    this.selBox = h('div', { class: 'sel-box', hidden: true }, h('i', { class: 'sel-handle' }));            // the dashed frame around what is selected (in page units)
+    this.overlay.append(this.selBox);
     this.fileInput = h('input', { type: 'file', accept: 'image/*', hidden: true, tabindex: '-1', 'aria-hidden': 'true' });
     this.fileInput.addEventListener('change', () => { const f = this.fileInput.files && this.fileInput.files[0]; this.fileInput.value = ''; if (f) this.addPicture(f); });
     this.loadingEl = h('div', { class: 'loading', hidden: true }, 'Loading page…');
@@ -395,7 +424,7 @@ export class BoardView {
     for (const [id, label, ic] of TOOLS) {
       if ((id === 'laser' && !(this.isTeacher && !this.assign)) || (id === 'stamp' && !this.isTeacher)) continue;
       items.push(h('button', { class: 'tbtn tool', 'aria-pressed': String(this.tool === id), disabled: !this.toolAllowed(id), 'data-tool': id, title: label, 'aria-label': label, onclick: () => { if (id === this.tool && (id === 'sticker' || id === 'tape' || id === 'image')) { this.popOpen = !this.popOpen; this.renderOpts(); } else this.setTool(id); } }, iconEl(ic, 22)));
-      if (id === 'move' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
+      if (id === 'select' || id === 'ellipse') items.push(h('span', { class: 'tsep' }));
     }
     items.push(h('span', { class: 'tsep' }));
     for (const [k, label] of [['protractor', 'Protractor'], ['ruler', 'Ruler'], ['compass', 'Compass']]) {
@@ -415,6 +444,7 @@ export class BoardView {
     const was = this.tool;
     this.tool = t; this.popOpen = t !== 'image';       // (the picture tool opens the photo chooser instead of a panel)
     if (t !== 'image' && t !== 'sticker') this.imgSel = null;
+    if (t !== 'select') this.clearSel();
     this.stage.classList.toggle('move', t === 'move'); this.stage.classList.toggle('erase', t === 'eraser');
     this.renderRail(); this.renderOpts();
     if (t !== 'laser') this.laserPts = [];
@@ -473,7 +503,7 @@ export class BoardView {
       kids.push(h('button', { class: 'btn primary sm', onclick: () => { this.popOpen = false; this.renderOpts(); this.pickPicture(); } }, iconEl('image', 18), 'Add a picture'),
         h('span', { class: 'note' }, 'Drag a picture to move it, drag its corner to resize.'));
     } else {
-      const notes = { eraser: 'Touch a mark to remove it. Undo brings it back.', laser: 'Move over the page: everyone sees a red dot.' };
+      const notes = { select: 'Tap something to pick it, or draw a loop around things. Then drag to move, drag the corner to resize.', eraser: 'Touch a mark to remove it. Undo brings it back.', laser: 'Move over the page: everyone sees a red dot.' };
       if (notes[t]) kids.push(h('span', { class: 'note' }, notes[t]));
     }
     if (this.editor) kids.push(h('button', { class: 'btn primary sm', onclick: () => this.commitEditor() }, iconEl('check', 18), 'Done'));
@@ -526,6 +556,7 @@ export class BoardView {
   selectImg(id) { this.imgSel = id; this.positionImgBox(); }
   // the frame and corner handle around the picked picture (in page units: the overlay is scaled with the page)
   positionImgBox() {
+    this.positionSel();
     const b = this.imgBox; if (!b) return;
     const o = this.imgSel && this.store.objs.get(this.imgSel);
     if (!o || o.deleted || o.page_id !== this.pageId || (this.tool !== 'image' && this.tool !== 'sticker')) { b.hidden = true; return; }
@@ -563,7 +594,7 @@ export class BoardView {
   setPage(id, { keepView = false, user = false } = {}) {
     const pg = this.store.pages.find(p => p.id === id); if (!pg) return;
     if (user) this.userMoved();
-    this.commitEditor();
+    this.commitEditor(); this.clearSel();
     this.pageId = id; this.cur = null; this.ghosts.clear(); this.laserPts = []; this.rectCache = null; this.clearStroke();
     this.sheet.style.width = '1000px'; this.sheet.style.height = pg.h + 'px';
     if (!keepView) { this.autoFit = true; this.fitNow(false); }
@@ -987,11 +1018,12 @@ export class BoardView {
     if (this.pointers.size >= 2) { this.cancelCurrent(); this.startGesture(); this.tap.down(this.pointers); return; }   // two fingers never write: they zoom, move, or (a quick tap) undo
     this.suppress = false;
     // "Pencil only": a finger only moves the page
-    if (e.pointerType === 'touch' && pencil.only && !['image', 'sticker', 'tape'].includes(this.tool)) { this.startPan(e); return; }   // (a finger may still move a picture or put on a sticker or tape: that is not writing)
+    if (e.pointerType === 'touch' && pencil.only && !['image', 'sticker', 'tape', 'select'].includes(this.tool)) { this.startPan(e); return; }   // (a finger may still move a picture or put on a sticker or tape: that is not writing)
     const panning = this.tool === 'move' || e.button === 1 || this.spaceDown || (!this.toolAllowed(this.tool));
     if (panning) { this.startPan(e); return; }
     const p = this.toPage(e); this.downAt = { x: e.clientX, y: e.clientY, p, moved: false };
     const t = this.tool;
+    if (t === 'select') { this.selDown(p, e); return; }
     if (t === 'pen' || t === 'highlighter') {
       const pr = e.pointerType === 'pen' && t === 'pen';
       const data = { c: t === 'pen' ? this.color : this.hlColor, s: (t === 'pen' ? PEN_SIZES : HL_SIZES)[this.sizeIdx], pr: pr ? 1 : 0, p: pr ? [p.x, p.y, e.pressure || 0.5] : [p.x, p.y] };
@@ -1030,6 +1062,7 @@ export class BoardView {
     if (this.g) { this.tap.move(e.pointerId, e.clientX, e.clientY); if (this.tap.s && !this.tap.s.moved) return; this.updateGesture(); return; }
     if (this.pan) { this.updatePan(e); return; }
     if (this.imgDrag) { this.moveImg(e); return; }
+    if (this.tool === 'select' && (this.selDrag || this.lasso)) { this.selMove(e); return; }
     if (!this.downAt) return;
     if (Math.hypot(e.clientX - this.downAt.x, e.clientY - this.downAt.y) > 5) this.downAt.moved = true;
     const t = this.tool;
@@ -1085,6 +1118,7 @@ export class BoardView {
       if (!moved && !cancelled && tool === 'move' && !this.pointers.size) this.whoWrote(this.toPage(e), e);
       return;
     }
+    if (this.selDrag || this.lasso) { this.selUp(e, cancelled); return; }
     if (this.imgDrag) {
       const D = this.imgDrag, o = this.store.objs.get(D.id); this.imgDrag = null; this.downAt = null;
       if (o) {
@@ -1273,6 +1307,123 @@ export class BoardView {
     if (a.del.length || a.add.length) this.pushUndo(a);
   }
 
+  // ===================================================================== select, lasso, move, resize, copy, delete
+  selObjs() { return [...this.sel].map(id => this.store.objs.get(id)).filter(o => o && !o.deleted && o.page_id === this.pageId); }
+  clearSel() { if (!this.sel) return; this.sel = new Set(); this.selDrag = null; this.lasso = null; if (this.lassoSvg) { this.lassoSvg.remove(); this.lassoSvg = null; } this.positionSel(); }
+  selBounds(list = this.selObjs()) {
+    if (!list.length) return null; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const o of list) { const b = bounds(o); x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); }
+    return { x0, y0, x1, y1 };
+  }
+  // the dashed frame, its corner handle and the little bar of buttons above it
+  positionSel() {
+    const b = this.selBox; if (!b) return;
+    const list = this.tool === 'select' ? this.selObjs() : [], bb = list.length ? this.selBounds(list) : null;
+    if (!bb) { b.hidden = true; if (this.selBar) { this.selBar.remove(); this.selBar = null; } return; }
+    const s = this.view.s || 1, pad = 6 / s;
+    b.hidden = false;
+    Object.assign(b.style, { left: bb.x0 - pad + 'px', top: bb.y0 - pad + 'px', width: bb.x1 - bb.x0 + pad * 2 + 'px', height: bb.y1 - bb.y0 + pad * 2 + 'px', borderWidth: 2 / s + 'px' });
+    const hd = b.firstChild; hd.style.width = hd.style.height = 22 / s + 'px'; hd.style.right = hd.style.bottom = -11 / s + 'px'; hd.style.borderWidth = 2 / s + 'px';
+    if (!this.selBar) {
+      this.selBar = h('div', { class: 'sel-bar', role: 'toolbar', 'aria-label': 'Selected' },
+        h('button', { class: 'btn sm', title: 'Make a copy', onclick: () => this.selDuplicate() }, iconEl('copy', 16), 'Copy'),
+        h('button', { class: 'btn sm danger', title: 'Delete', onclick: () => this.selDelete() }, iconEl('trash', 16), 'Delete'));
+      this.selBar.addEventListener('pointerdown', e => e.stopPropagation());
+      this.stage.append(this.selBar);
+    }
+    const sr = this.stage.getBoundingClientRect(), v = this.view, bw = this.selBar.offsetWidth || 150, bh = this.selBar.offsetHeight || 36;
+    const cx = v.tx + (bb.x0 + bb.x1) / 2 * v.s, top = v.ty + bb.y0 * v.s - bh - 12, bottom = v.ty + bb.y1 * v.s + 16;
+    this.selBar.style.left = Math.max(6, Math.min(sr.width - bw - 6, cx - bw / 2)) + 'px';
+    this.selBar.style.top = Math.max(6, Math.min(sr.height - bh - 70, top < 8 ? bottom : top)) + 'px';
+  }
+  // what is under the finger: ink first, then highlighting, then pictures and stickers (the same order they are painted in)
+  pickAt(p, r) {
+    const list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && this.store.canEdit(o));
+    const rank = o => DECOR(o) ? 0 : o.type === 'highlighter' ? 1 : 2;
+    const order = list.map((o, i) => [o, i]).sort((a, b) => rank(b[0]) - rank(a[0]) || b[1] - a[1]).map(x => x[0]);
+    for (const o of order) if (hit(o, p.x, p.y, r)) return o;
+    let best = null, area = Infinity;                       // a box or circle can also be picked from inside it (the smallest one under the finger)
+    for (const o of order) if (o.type === 'rect' || o.type === 'ellipse') { const b = bounds(o); if (p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1) { const a = (b.x1 - b.x0) * (b.y1 - b.y0); if (a < area) { area = a; best = o; } } }
+    return best;
+  }
+  selDown(p, e) {
+    const s = this.view.s || 1, r = 10 / s;
+    const list = this.selObjs(), bb = list.length ? this.selBounds(list) : null;
+    this.downAt = null;
+    if (bb && Math.hypot(p.x - (bb.x1 + 6 / s), p.y - (bb.y1 + 6 / s)) <= 22 / s) {            // the corner handle: resize
+      this.selDrag = { mode: 'scale', p0: p, ax: bb.x0, ay: bb.y0, d0: Math.max(10, Math.hypot(bb.x1 - bb.x0, bb.y1 - bb.y0)), before: list.map(o => ({ id: o.id, data: o.data })), moved: false }; return;
+    }
+    if (bb && p.x >= bb.x0 - 8 / s && p.x <= bb.x1 + 8 / s && p.y >= bb.y0 - 8 / s && p.y <= bb.y1 + 8 / s) {   // inside the frame: move everything selected
+      this.selDrag = { mode: 'move', p0: p, before: list.map(o => ({ id: o.id, data: o.data })), bb, moved: false }; return;
+    }
+    const o = this.pickAt(p, r);
+    if (o) {
+      this.sel = new Set([o.id]); this.positionSel();
+      this.selDrag = { mode: 'move', p0: p, before: [{ id: o.id, data: o.data }], bb: this.selBounds([o]), moved: false }; return;
+    }
+    this.clearSel();                                                                        // empty place: start a loop
+    this.lasso = { pts: [p], cl: [{ x: e.clientX, y: e.clientY }] };
+    const sr = this.stage.getBoundingClientRect();
+    this.lassoSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); this.lassoSvg.setAttribute('class', 'lasso');
+    this.lassoSvg.innerHTML = '<path fill="rgba(31,111,120,.08)" stroke="#1F6F78" stroke-width="2.5" stroke-dasharray="7 6" stroke-linecap="round" stroke-linejoin="round"/>';
+    this.lassoOff = { x: sr.left, y: sr.top }; this.stage.append(this.lassoSvg);
+  }
+  selMove(e) {
+    if (this.lasso) {
+      const L = this.lasso, last = L.cl[L.cl.length - 1];
+      if (Math.hypot(e.clientX - last.x, e.clientY - last.y) < 3) return;
+      L.cl.push({ x: e.clientX, y: e.clientY }); L.pts.push(this.toPage(e));
+      this.lassoSvg.firstChild.setAttribute('d', 'M' + L.cl.map(q => (q.x - this.lassoOff.x).toFixed(1) + ' ' + (q.y - this.lassoOff.y).toFixed(1)).join('L') + 'Z');
+      return;
+    }
+    const D = this.selDrag, p = this.toPage(e), s = this.view.s || 1;
+    if (!D.moved && Math.hypot(p.x - D.p0.x, p.y - D.p0.y) * s < 4) return; D.moved = true;
+    let fn, k = 1;
+    if (D.mode === 'move') {
+      let dx = p.x - D.p0.x, dy = p.y - D.p0.y; const H = this.page ? this.page.h : 1400;
+      dx = Math.max(-D.bb.x0, Math.min(1000 - D.bb.x1, dx)); dy = Math.max(-D.bb.y0, Math.min(H - D.bb.y1, dy));
+      fn = (x, y) => [x + dx, y + dy];
+    } else {
+      k = Math.max(0.15, Math.min(6, Math.hypot(p.x - D.ax, p.y - D.ay) / D.d0)); fn = (x, y) => [D.ax + (x - D.ax) * k, D.ay + (y - D.ay) * k];
+    }
+    for (const m of D.before) { const o = this.store.objs.get(m.id); if (o) { o.data = mapData(o.type, m.data, fn, k); o._b = null; } }
+    this.scheduleInk(); this.positionSel();
+  }
+  selUp(e, cancelled) {
+    if (this.lasso) {
+      const L = this.lasso; this.lasso = null; if (this.lassoSvg) { this.lassoSvg.remove(); this.lassoSvg = null; }
+      if (!cancelled && L.pts.length > 4) {
+        const poly = L.pts, picked = this.store.pageObjects(this.pageId).filter(o => !o.deleted && this.store.canEdit(o) && this.insideLoop(o, poly));
+        this.sel = new Set(picked.map(o => o.id));
+      }
+      this.positionSel(); return;
+    }
+    const D = this.selDrag; this.selDrag = null; if (!D) return;
+    const objs = D.before.map(m => this.store.objs.get(m.id)).filter(Boolean);
+    if (cancelled || !D.moved) { for (const m of D.before) { const o = this.store.objs.get(m.id); if (o) { o.data = m.data; o._b = null; } } this.scheduleInk(); this.positionSel(); return; }
+    const list = [];
+    for (const m of D.before) { const o = this.store.objs.get(m.id); if (!o) continue; const after = o.data; o.data = m.data; this.store.updateData(m.id, after); list.push({ id: m.id, before: m.data, after }); }
+    this.pushUndo({ t: 'multi', list }); this.thumbDirty(this.pageId); this.scheduleInk(); this.positionSel();
+  }
+  insideLoop(o, poly) {
+    const b = bounds(o), pts = [];
+    if (o.type === 'pen' || o.type === 'highlighter') { const st = o.data.pr ? 3 : 2, p = o.data.p; for (let i = 0; i < p.length; i += st * Math.max(1, Math.floor(p.length / st / 24))) pts.push([p[i], p[i + 1]]); }
+    else pts.push([b.x0, b.y0], [b.x1, b.y0], [b.x0, b.y1], [b.x1, b.y1], [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2]);
+    let inn = 0; for (const q of pts) if (pointInPoly(q[0], q[1], poly)) inn++;
+    return inn / pts.length >= 0.5;
+  }
+  selDelete() {
+    const ids = this.selObjs().map(o => o.id); if (!ids.length) return;
+    this.store.setDeleted(ids, true); this.pushUndo({ t: 'delete', ids }); this.clearSel(); this.renderInk(); this.thumbDirty(this.pageId);
+  }
+  selDuplicate() {
+    const list = this.selObjs(); if (!list.length) return;
+    if (this.locked) return toast('Writing is locked by your teacher.', 'bad');
+    const H = this.page ? this.page.h : 1400, bb = this.selBounds(list), off = 28, dx = Math.min(off, 1000 - bb.x1), dy = Math.min(off, H - bb.y1), ids = [];
+    for (const o of list) { const n = this.store.addObject(o.type, this.pageId, mapData(o.type, o.data, (x, y) => [x + dx, y + dy], 1)); ids.push(n.id); }
+    this.pushUndo({ t: 'creates', ids }); this.sel = new Set(ids); this.renderInk(); this.positionSel(); this.thumbDirty(this.pageId);
+  }
+
   // ---- gestures
   startPan(e) {
     this.userMoved(); this.autoFit = false;
@@ -1315,6 +1466,8 @@ export class BoardView {
   onKey(e) {
     if (e.target.closest && e.target.closest('input, textarea, select')) return;
     if (e.code === 'Space') { this.spaceDown = true; e.preventDefault(); return; }
+    if (this.sel.size && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); this.selDelete(); return; }
+    if (this.sel.size && e.key === 'Escape') { this.clearSel(); return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? this.doRedo() : this.doUndo(); }
     else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); this.doRedo(); }
@@ -1387,6 +1540,8 @@ export class BoardView {
     if (a.t === 'create') pages = this.store.setDeleted([a.id], inverse);
     else if (a.t === 'delete') pages = this.store.setDeleted(a.ids, !inverse);
     else if (a.t === 'erase') pages = [...this.store.setDeleted(a.add, inverse), ...this.store.setDeleted(a.del, !inverse)];   // part of a stroke erased: undo removes the pieces and brings the whole stroke back
+    else if (a.t === 'creates') pages = this.store.setDeleted(a.ids, inverse);
+    else if (a.t === 'multi') { for (const m of a.list) { this.store.updateData(m.id, inverse ? m.before : m.after); const o = this.store.objs.get(m.id); if (o) pages.push(o.page_id); } }
     else if (a.t === 'edit') { this.store.updateData(a.id, inverse ? a.before : a.after); const o = this.store.objs.get(a.id); if (o) pages = [o.page_id]; }
     this.renderInk(); for (const p of pages) this.thumbDirty(p);
   }

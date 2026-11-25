@@ -1089,3 +1089,12 @@ input, textarea, select { font-size: max(16px, 1em); }
 .me-work .bsec.sent-h .bsec-n { background: var(--mint); font-size: 18px; min-width: 32px; height: 32px; }
 @media (max-width: 560px) { .me-work .bsec { font-size: 28px; } }
 @media (max-width: 560px) { .me-top { flex-direction: column; align-items: stretch; } .me-top .idea-slot { flex: none; width: 100%; } .me-top .join-head { flex: none; } }
+
+/* select tool: the dashed frame, the loop being drawn, and the little bar of buttons */
+.sel-box { position: absolute; border: 2px dashed #1F6F78; background: rgba(31,111,120,.06); pointer-events: none; box-sizing: border-box; }
+.sel-box[hidden] { display: none; }
+.sel-handle { position: absolute; border: 2px solid #1F6F78; background: #fff; border-radius: 50%; box-sizing: border-box; }
+.lasso { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; overflow: visible; }
+.sel-bar { position: absolute; z-index: 24; display: flex; gap: 6px; padding: 4px; background: #fff; border: 1px solid var(--hair); box-shadow: var(--shadow-2); }
+.sel-bar .btn { min-height: 32px; }
+.stage.select, .b-stage.select { cursor: crosshair; }
