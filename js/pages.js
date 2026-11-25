@@ -3,7 +3,9 @@ import { h, uuid, makeCode, modal, toast } from './util.js';
 import { BUCKET, friendlyError } from './db.js';
 import { pdfFromFile, pdfInfo } from './pdf.js';
 import { iconEl } from './icons.js';
-import { saveCover } from './covers.js';
+import { saveCover, portraitCover, saveCoverImage } from './covers.js';
+import { validUrl } from './shelf.js';
+import { CONFIG } from '../config.js';
 
 export const PAGE_H = { landscape: 625, portrait: 1414 };
 const MAX_FILE = 50 * 1024 * 1024;
@@ -75,14 +77,20 @@ export async function addPagesToBoard(sb, boardId, startIdx, spec, progress = ()
   return full.length;
 }
 
-export async function createBoard(sb, { title, classId, spec, mode = 'live', startsAt = null, dueAt = null }, progress) {
+export async function createBoard(sb, { title, classId, spec, mode = 'live', startsAt = null, dueAt = null, link = null }, progress) {
   let board = null;
   for (let tries = 0; tries < 6 && !board; tries++) {
-    const { data, error } = await sb.from('boards').insert({ title, class_id: classId || null, code: makeCode(6), mode, starts_at: startsAt, due_at: dueAt }).select().single();
+    const row = { title, class_id: classId || null, code: makeCode(6), mode, starts_at: startsAt, due_at: dueAt };
+    if (link) { row.link_url = link.url; row.link_note = link.note || null; }
+    const { data, error } = await sb.from('boards').insert(row).select().single();
     if (!error) board = data;
     else if (error.code !== '23505') throw error;
   }
   if (!board) throw new Error('Could not make a short code. Try again.');
+  if (link) {                      // a link task has no pages: only the address, the message and (maybe) a cover picture
+    try { if (link.coverFile) await saveCoverImage(sb, board.id, await portraitCover(link.coverFile)); } catch (e) { /* the cover picture is a nice extra */ }
+    return board;
+  }
   try { await addPagesToBoard(sb, board.id, 0, spec, progress); }
   catch (e) { await deleteBoard(sb, board.id).catch(() => {}); throw e; }
   try { await saveCover(sb, board.id); } catch (e) { /* the cover picture is a nice extra: the board is fine without it */ }
@@ -218,5 +226,52 @@ export function scheduleDialog({ sb, board, onSaved }) {
     Object.assign(board, row); m.close();
     toast(s ? `Hidden from students until ${fmtWhen(s)}.` : 'Students can see it now.', 'ok');
     if (onSaved) onSaved(board);
+  });
+}
+
+
+// ---- link tasks: the students open a web page or web app, and read a message (for example "take a screenshot and send it to the teacher")
+export function defaultLinkNote() {
+  try { const n = localStorage.getItem('bem-link-note'); if (n) return n; } catch (e) { /* fine */ }
+  return `When you finish, take a screenshot and send it to Teacher ${CONFIG.TEACHER_NAME || 'your teacher'}.`;
+}
+export function linkFields({ url = '', note = null, editing = false } = {}) {
+  const u = h('input', { class: 'input', id: 'lk-u', type: 'url', placeholder: 'https://', value: url, maxlength: '500', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off' });
+  const n = h('textarea', { class: 'input', id: 'lk-n', rows: '3', maxlength: '600', style: { fontSize: '16px' } }); n.value = note === null ? defaultLinkNote() : note;
+  const file = h('input', { type: 'file', class: 'input', id: 'lk-c', accept: 'image/png,image/jpeg,image/webp,image/gif', 'aria-label': 'Cover picture' });
+  const drop = h('input', { type: 'checkbox', id: 'lk-d' });
+  const el = h('div', null,
+    h('div', { class: 'field' }, h('label', { for: 'lk-u' }, 'Web link'), u, h('span', { class: 'hint' }, 'The web app or page the students open. It opens in a new tab.')),
+    h('div', { class: 'field' }, h('label', { for: 'lk-n' }, 'Message for students'), n, h('span', { class: 'hint' }, 'You can change this text. Students read it before they open the link.')),
+    h('div', { class: 'field' }, h('label', { for: 'lk-c' }, 'Cover picture (optional)'), file, h('span', { class: 'hint' }, 'A screenshot of the app, so students recognise it on their shelf.'),
+      editing ? h('label', { class: 'check-line', for: 'lk-d' }, drop, ' Remove the current cover picture') : null));
+  return {
+    el,
+    // -> { url, note, coverFile, dropCover } or throws a short message
+    values() {
+      const url = u.value.trim();
+      if (!validUrl(url)) { u.focus(); throw new Error('That link does not look right. It should look like https://example.com/game'); }
+      const note = n.value.trim();
+      try { localStorage.setItem('bem-link-note', note); } catch (e) { /* fine */ }
+      return { url, note, coverFile: (file.files && file.files[0]) || null, dropCover: drop.checked };
+    },
+  };
+}
+export function editLinkDialog({ sb, board, onSaved }) {
+  const title = h('input', { class: 'input', id: 'lk-t', value: board.title, maxlength: '120' });
+  const f = linkFields({ url: board.link_url || '', note: board.link_note || '', editing: true });
+  const err = h('p', { class: 'error', role: 'alert' });
+  const go = h('button', { class: 'btn primary' }, 'Save');
+  const m = modal({ title: 'Link task', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'lk-t' }, 'Name'), title), f.el, err), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go] });
+  go.addEventListener('click', async () => {
+    err.textContent = ''; go.disabled = true;
+    try {
+      const t = title.value.trim(); if (!t) throw new Error('Give it a name.');
+      const v = f.values();
+      const { error } = await sb.from('boards').update({ title: t, link_url: v.url, link_note: v.note || null }).eq('id', board.id);
+      if (error) throw error;
+      if (v.coverFile) await saveCoverImage(sb, board.id, await portraitCover(v.coverFile)); else if (v.dropCover) await saveCoverImage(sb, board.id, null);
+      m.close(); toast('Saved.', 'ok'); onSaved && onSaved();
+    } catch (e) { err.textContent = friendlyError(e); go.disabled = false; }
   });
 }

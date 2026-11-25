@@ -1021,3 +1021,8 @@ input, textarea, select { font-size: max(16px, 1em); }
 .b-pop .sep { height: 20px; }
 .b-pop .note { font-size: 13px; }
 @media (pointer: coarse) { .b-pop .sw, .b-pop .sw.custom { width: 28px; height: 28px; } .b-pop .sz { height: 28px; } .b-pop .btn, .b-pop .btn.sm { min-height: 28px; height: 28px; } }
+
+.book-ribbon.link { background: var(--sky); }
+.link-note { white-space: pre-wrap; font-size: 18px; line-height: 1.45; margin: 0 0 6px; }
+.notice.link-note { font-size: 18px; }
+.check-line { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 15px; }
