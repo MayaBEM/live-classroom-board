@@ -591,8 +591,8 @@ export class BoardView {
   // how far the page was pushed beyond where it can go (+ = pushed up, towards the next page; - = pushed down, towards the previous one)
   overY(rawTy, s) {
     const pg = this.page; if (!pg) return 0;
-    const { h } = this.stageSize(), top = this.insetTop(), pad = 12, ph = pg.h * s, availH = h - top;
-    const fits = ph <= availH - pad + 1, lo = fits ? top + (availH - ph) / 2 : h - ph - pad, hi = fits ? lo : top;
+    const { h } = this.stageSize(), top = this.insetTop(), bot = this.insetBottom(), pad = 12, ph = pg.h * s, availH = h - top - bot;
+    const fits = ph <= availH - pad + 1, lo = fits ? top + (availH - ph) / 2 : h - bot - ph, hi = fits ? lo : top;
     return rawTy < lo ? lo - rawTy : rawTy > hi ? -(rawTy - hi) : 0;
   }
   // the page follows the finger a little beyond its edge, with a hint of what will happen when it is let go
@@ -632,18 +632,19 @@ export class BoardView {
 
   stageSize() { return { w: this.stage.clientWidth || 800, h: this.stage.clientHeight || 600 }; }
 
+  insetBottom() { return 62; }   // room under the page for the zoom and page buttons, so they never hide the writing
   insetTop() {   // room for the floating colour panel
     const narrow = this.stage && this.stage.clientWidth < 720;
     if (!narrow) return 58;
     return this.elOpts && !this.elOpts.hidden ? Math.min(110, this.elOpts.offsetHeight + 14) : 10;
   }
 
-  fitScale() { const { w, h } = this.stageSize(), pg = this.page; if (!pg) return 1; const pad = w < 600 ? 8 : 20; return Math.max(MIN_S, Math.min((w - pad * 2) / 1000, (h - pad * 2 - this.insetTop()) / pg.h)); }
+  fitScale() { const { w, h } = this.stageSize(), pg = this.page; if (!pg) return 1; const pad = w < 600 ? 8 : 20; return Math.max(MIN_S, Math.min((w - pad * 2) / 1000, (h - pad * 2 - this.insetTop() - this.insetBottom()) / pg.h)); }
 
   fitNow() {
     const pg = this.page; if (!pg) return;
-    const { w, h } = this.stageSize(), s = this.fitScale(), top = this.insetTop();
-    this.view = { s, tx: (w - 1000 * s) / 2, ty: Math.max(12, top + (h - top - pg.h * s) / 2) };
+    const { w, h } = this.stageSize(), s = this.fitScale(), top = this.insetTop(), bot = this.insetBottom();
+    this.view = { s, tx: (w - 1000 * s) / 2, ty: Math.max(12, top + (h - top - bot - pg.h * s) / 2) };
   }
   fit() { this.userMoved(); this.autoFit = true; this.fitNow(); this.applyView(); }
 
@@ -651,11 +652,11 @@ export class BoardView {
   // Zoomed in, it can only move until its edges reach the edges of the screen.
   clampView() {
     const pg = this.page; if (!pg) return;
-    const { w, h } = this.stageSize(), v = this.view, top = this.insetTop(), pad = 12, fit = this.fitScale();
+    const { w, h } = this.stageSize(), v = this.view, top = this.insetTop(), bot = this.insetBottom(), pad = 12, fit = this.fitScale();
     v.s = clamp(v.s, fit, Math.max(fit, MAX_S));
-    const pw = 1000 * v.s, ph = pg.h * v.s, availH = h - top;
+    const pw = 1000 * v.s, ph = pg.h * v.s, availH = h - top - bot;
     v.tx = pw <= w - 2 * pad + 1 ? (w - pw) / 2 : clamp(v.tx, w - pw - pad, pad);
-    v.ty = ph <= availH - pad + 1 ? top + (availH - ph) / 2 : clamp(v.ty, h - ph - pad, top);
+    v.ty = ph <= availH - pad + 1 ? top + (availH - ph) / 2 : clamp(v.ty, h - bot - ph, top);
     this.zoomPct = Math.round(v.s / fit * 100);
     if (this.el) for (const e of this.el.querySelectorAll('.zoom-pct')) e.textContent = this.zoomPct + '%';
   }
