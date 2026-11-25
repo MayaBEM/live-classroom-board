@@ -1066,3 +1066,26 @@ input, textarea, select { font-size: max(16px, 1em); }
 @keyframes it-wave { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-.32em); } }
 @keyframes it-rainbow { 0% { color: #D62F2F; } 17% { color: #EE7A1C; } 33% { color: #E0A800; } 50% { color: #1F8A4C; } 67% { color: #1F5FBF; } 83% { color: #7A3FA0; } 100% { color: #D62F2F; } }
 @media (prefers-reduced-motion: reduce) { .idea-t, .it-l { animation: none !important; } }
+
+/* the board on a student's page: a long strip that starts after the name and runs to the edge; it shows the top of the sheet, and the button makes it bigger */
+.me-top .join-head { flex: 0 0 auto; max-width: 100%; }
+.me-top .idea-slot { flex: 1 1 380px; width: auto; min-width: 0; max-width: none; }
+.idea-sheet { aspect-ratio: 5 / 1; overflow: hidden; }
+.idea-canvas, .idea-live, .idea-texts { inset: 0 0 auto 0; height: auto; aspect-ratio: 2 / 1; }
+.idea-wrap.big { position: absolute; right: 0; top: 0; z-index: 30; width: 100%; }
+.idea-wrap.big .idea-sheet { aspect-ratio: 2 / 1; }
+.idea-teacher-board .idea-sheet { aspect-ratio: 2 / 1; }
+.idea-more { position: absolute; right: 6px; bottom: 4px; z-index: 3; padding: 1px 8px; font-size: 12px; font-weight: 700; background: #FFE45C; border: 1px solid rgba(0,0,0,.4); pointer-events: none; }
+.idea-more[hidden] { display: none; }
+.idea-wrap.big .idea-more { display: none; }
+.idea-textbar .chip.stk { padding: 1px 3px; min-width: 34px; }
+.idea-textbar .chip.stk canvas { display: block; }
+@media (max-width: 860px) { .me-top .idea-slot { flex: 1 1 100%; } .idea-sheet { aspect-ratio: 3 / 1; } }
+/* the headings of the work shelf: big, so students see what there is to do */
+.me-work .bsec { font-size: 34px; margin: 22px 0 6px; display: flex; align-items: center; gap: 12px; letter-spacing: 0; }
+.me-work .bsec:first-child { margin-top: 0; }
+.me-work .bsec .bsec-n { display: inline-grid; place-items: center; min-width: 40px; height: 40px; padding: 0 10px; background: var(--orange); color: var(--ink); border: 2px solid var(--ink); font-size: 22px; }
+.me-work .bsec.sent-h { font-size: 26px; color: var(--ink-2); }
+.me-work .bsec.sent-h .bsec-n { background: var(--mint); font-size: 18px; min-width: 32px; height: 32px; }
+@media (max-width: 560px) { .me-work .bsec { font-size: 28px; } }
+@media (max-width: 560px) { .me-top { flex-direction: column; align-items: stretch; } .me-top .idea-slot { flex: none; width: 100%; } .me-top .join-head { flex: none; } }

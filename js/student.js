@@ -394,8 +394,8 @@ export async function startClass(root, classCode) {
         appsSection(data.apps, `bem-seen-class-${classCode}-${name}`),
         h('div', { class: 'me-work' },
           data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'No boards yet. '), 'When your teacher adds one, it shows up here.'),
-          todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'shelf' }, todo.map(card)),
-          done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'shelf' }, done.map(card)),
+          todo.length ? h('h2', { class: 'bsec' }, 'To do', h('span', { class: 'bsec-n' }, todo.length)) : null, h('div', { class: 'shelf' }, todo.map(card)),
+          done.length ? h('h2', { class: 'bsec sent-h' }, 'Sent', h('span', { class: 'bsec-n' }, done.length)) : null, h('div', { class: 'shelf' }, done.map(card)),
           h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), h('button', { class: 'btn quiet', onclick: () => { forget(); showNames(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
     fillCovers(sb, data.boards.map(b => b.id));
@@ -495,7 +495,7 @@ export async function startMe(root, pageCode, opts = {}) {
       } catch (e) { dirty = true; status.textContent = 'Not saved. Check your internet.'; }
     };
     ideaFlush = () => { if (dirty) save(); };
-    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: 'Tell Teacher Maya', onChange: list => { latest = list; dirty = true; status.textContent = 'Writing…'; clearTimeout(ideaTimer); if (!firstAt) firstAt = Date.now(); ideaTimer = setTimeout(save, Math.max(0, Math.min(3000, firstAt + 8000 - Date.now()))); } });
+    const box = new IdeaBoard({ strokes: idea.strokes, other: idea.tstrokes, label: 'Teacher and student board', onChange: list => { latest = list; dirty = true; status.textContent = 'Writing…'; clearTimeout(ideaTimer); if (!firstAt) firstAt = Date.now(); ideaTimer = setTimeout(save, Math.max(0, Math.min(3000, firstAt + 8000 - Date.now()))); } });
     const big = h('button', { type: 'button', class: 'ib', 'aria-label': 'Make the board bigger', title: 'Bigger', onclick: () => {
       const on = !inner.classList.contains('big');
       if (on) slot.style.minHeight = inner.offsetHeight + 'px';
@@ -547,8 +547,8 @@ export async function startMe(root, pageCode, opts = {}) {
         appsSection(data.apps, `bem-seen-${pageCode}`),
         h('div', { class: 'me-work' },
         data.boards.length || (data.apps && data.apps.length) ? null : h('div', { class: 'notice yellow' }, h('b', null, 'Nothing yet. '), 'When your teacher adds work for you, it shows up here.'),
-        todo.length ? h('h2', { class: 'bsec' }, 'To do') : null, h('div', { class: 'shelf' }, todo.map(card)),
-        done.length ? h('h2', { class: 'bsec' }, 'Sent') : null, h('div', { class: 'shelf' }, done.map(card)),
+        todo.length ? h('h2', { class: 'bsec' }, 'To do', h('span', { class: 'bsec-n' }, todo.length)) : null, h('div', { class: 'shelf' }, todo.map(card)),
+        done.length ? h('h2', { class: 'bsec sent-h' }, 'Sent', h('span', { class: 'bsec-n' }, done.length)) : null, h('div', { class: 'shelf' }, done.map(card)),
         h('div', { class: 'brow' }, h('button', { class: 'btn', onclick: refresh }, 'Refresh'), asTeacher ? null : h('button', { class: 'btn quiet', onclick: () => { forget(); showCode(); } }, 'This is not me')))));
     checkedPopup(news, newsKey);
     fillCovers(sb, data.boards.map(b => b.id));

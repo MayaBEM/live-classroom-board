@@ -490,7 +490,7 @@ export class TeacherApp {
   ideaPanel(m) {
     const host = h('div', { class: 'idea-teacher' }, h('p', { class: 'empty' }, 'Loading…'));
     const status = h('span', { class: 'idea-status' }, '');
-    const section = h('section', { class: 'sheet-panel' }, h('header', null, h('h2', null, `${m.first_name}'s board`), status), host);
+    const section = h('section', { class: 'sheet-panel' }, h('header', null, h('h2', null, `Teacher and ${m.first_name}'s board`), status), host);
     let box = null, row = null, timer = null, dirty = false, lastSeen = null;
     const saveInk = async list => {
       status.textContent = 'Saving…';
@@ -504,7 +504,7 @@ export class TeacherApp {
     };
     const build = r => {
       row = r || { strokes: [], tstrokes: [], reply: null, n: 0 };
-      box = new IdeaBoard({ strokes: row.tstrokes, other: row.strokes, ink: TEACHER_INK, otherInk: STUDENT_INK, label: 'Write back in purple',
+      box = new IdeaBoard({ strokes: row.tstrokes, other: row.strokes, ink: TEACHER_INK, otherInk: STUDENT_INK, label: 'Teacher and student board',
         onChange: list => { status.textContent = 'Writing…'; clearTimeout(timer); timer = setTimeout(() => saveInk(list), 900); } });
       const msg = h('input', { class: 'input', maxlength: '300', value: row.reply || '', placeholder: `A short message for ${m.first_name}`, 'aria-label': `Message for ${m.first_name}` });
       const saveMsg = async () => {
