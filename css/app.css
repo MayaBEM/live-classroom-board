@@ -1038,6 +1038,6 @@ input, textarea, select { font-size: max(16px, 1em); }
 .book-slot { display: flex; align-items: flex-end; aspect-ratio: 210 / 297; }
 .book-slot .book-face { width: 100%; }
 .book.is-link .book-face { aspect-ratio: 1 / 1; }
-.book.is-link .book-cv img { object-fit: contain; }
+.book.is-link .book-cv img { object-fit: cover; }
 .book.is-link .book-ph { font-size: 17px; }
 .link-chip { align-self: flex-start; padding: 0 8px; font-size: 13px; font-weight: 600; background: var(--sky); border: 1px solid rgba(0,0,0,.35); }
