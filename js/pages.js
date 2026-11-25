@@ -89,7 +89,7 @@ export async function createBoard(sb, { title, classId, spec, mode = 'live', sta
   }
   if (!board) throw new Error('Could not make a short code. Try again.');
   if (link) {                      // a link task has no pages: only the address, the message and (maybe) a cover picture
-    try { if (link.coverFile) await saveCoverImage(sb, board.id, await squareCover(link.coverFile)); } catch (e) { /* the cover picture is a nice extra */ }
+    try { if (link.coverFile) await saveCoverImage(sb, board.id, await squareCover(link.coverFile, link.coverMode)); } catch (e) { /* the cover picture is a nice extra */ }
     return board;
   }
   try { await addPagesToBoard(sb, board.id, 0, spec, progress); }
@@ -241,6 +241,10 @@ export function linkFields({ url = '', note = null, editing = false, apps = [], 
   const n = h('textarea', { class: 'input', id: 'lk-n', rows: '3', maxlength: '600', style: { fontSize: '16px' } }); n.value = note === null ? defaultLinkNote() : note;
   const file = h('input', { type: 'file', class: 'input', id: 'lk-c', accept: 'image/png,image/jpeg,image/webp,image/gif', 'aria-label': 'Cover picture' });
   const drop = h('input', { type: 'checkbox', id: 'lk-d' });
+  let fit = 'fill';
+  const fitSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'How the picture fills the square' });
+  const drawFit = () => fitSeg.replaceChildren(...[['fill', 'Fill the square'], ['whole', 'Show the whole picture']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(fit === k), onclick: () => { fit = k; drawFit(); } }, label)));
+  drawFit();
   // pull a web app straight from the teacher's app shelf: its link, its name and its cover picture
   let picked = null, pickedId = null;
   const pickNote = h('span', { class: 'hint' });
@@ -257,7 +261,7 @@ export function linkFields({ url = '', note = null, editing = false, apps = [], 
   const el = h('div', null, shelfBox,
     h('div', { class: 'field' }, h('label', { for: 'lk-u' }, 'Web link'), u, h('span', { class: 'hint' }, 'The web app or page the students open. It opens in a new tab.')),
     h('div', { class: 'field' }, h('label', { for: 'lk-n' }, 'Message for students'), n, h('span', { class: 'hint' }, 'You can change this text. Students read it before they open the link.')),
-    h('div', { class: 'field' }, h('label', { for: 'lk-c' }, 'Cover picture (optional)'), file, h('span', { class: 'hint' }, 'A screenshot of the app, so students recognise it on their shelf.'),
+    h('div', { class: 'field' }, h('label', { for: 'lk-c' }, 'Cover picture (optional)'), file, h('span', { class: 'hint' }, 'A screenshot of the app, so students recognise it on their shelf. The cover is a square.'), fitSeg,
       editing ? h('label', { class: 'check-line', for: 'lk-d' }, drop, ' Remove the current cover picture') : null));
   return {
     el,
@@ -267,7 +271,7 @@ export function linkFields({ url = '', note = null, editing = false, apps = [], 
       if (!validUrl(url)) { u.focus(); throw new Error('That link does not look right. It should look like https://example.com/game'); }
       const note = n.value.trim();
       try { localStorage.setItem('bem-link-note', note); } catch (e) { /* fine */ }
-      return { url, note, coverFile: (file.files && file.files[0]) || picked || null, dropCover: drop.checked };
+      return { url, note, coverFile: (file.files && file.files[0]) || picked || null, coverMode: fit, dropCover: drop.checked };
     },
   };
 }
@@ -284,7 +288,7 @@ export function editLinkDialog({ sb, board, apps = [], onSaved }) {
       const v = f.values();
       const { error } = await sb.from('boards').update({ title: t, link_url: v.url, link_note: v.note || null }).eq('id', board.id);
       if (error) throw error;
-      if (v.coverFile) await saveCoverImage(sb, board.id, await squareCover(v.coverFile)); else if (v.dropCover) await saveCoverImage(sb, board.id, null);
+      if (v.coverFile) await saveCoverImage(sb, board.id, await squareCover(v.coverFile, v.coverMode)); else if (v.dropCover) await saveCoverImage(sb, board.id, null);
       m.close(); toast('Saved.', 'ok'); onSaved && onSaved();
     } catch (e) { err.textContent = friendlyError(e); go.disabled = false; }
   });
