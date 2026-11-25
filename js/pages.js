@@ -4,7 +4,8 @@ import { BUCKET, friendlyError } from './db.js';
 import { pdfFromFile, pdfInfo } from './pdf.js';
 import { iconEl } from './icons.js';
 import { saveCover, portraitCover, saveCoverImage } from './covers.js';
-import { validUrl } from './shelf.js';
+import { validUrl, appThumb } from './shelf.js';
+import { shortTitle } from './library.js';
 import { CONFIG } from '../config.js';
 
 export const PAGE_H = { landscape: 625, portrait: 1414 };
@@ -235,12 +236,25 @@ export function defaultLinkNote() {
   try { const n = localStorage.getItem('bem-link-note'); if (n) return n; } catch (e) { /* fine */ }
   return `When you finish, take a screenshot and send it to Teacher ${CONFIG.TEACHER_NAME || 'your teacher'}.`;
 }
-export function linkFields({ url = '', note = null, editing = false } = {}) {
+export function linkFields({ url = '', note = null, editing = false, apps = [], onPick = null } = {}) {
   const u = h('input', { class: 'input', id: 'lk-u', type: 'url', placeholder: 'https://', value: url, maxlength: '500', inputmode: 'url', autocapitalize: 'off', autocorrect: 'off' });
   const n = h('textarea', { class: 'input', id: 'lk-n', rows: '3', maxlength: '600', style: { fontSize: '16px' } }); n.value = note === null ? defaultLinkNote() : note;
   const file = h('input', { type: 'file', class: 'input', id: 'lk-c', accept: 'image/png,image/jpeg,image/webp,image/gif', 'aria-label': 'Cover picture' });
   const drop = h('input', { type: 'checkbox', id: 'lk-d' });
-  const el = h('div', null,
+  // pull a web app straight from the teacher's app shelf: its link, its name and its cover picture
+  let picked = null, pickedId = null;
+  const pickNote = h('span', { class: 'hint' });
+  const grid = h('div', { class: 'app-pick', role: 'group', 'aria-label': 'My app shelf' });
+  const drawPick = () => {
+    grid.replaceChildren(...apps.map(a => h('button', { type: 'button', class: 'app-pick-i', 'aria-pressed': String(pickedId === a.id), title: a.title, onclick: () => {
+      pickedId = a.id; u.value = a.url || ''; picked = a.cover || null; drawPick();
+      pickNote.textContent = picked ? `"${a.title}" chosen. Its cover picture is used too.` : `"${a.title}" chosen.`;
+      onPick && onPick({ ...a, title: shortTitle(a.title) });
+    } }, appThumb(a, false) || h('span', { class: 'aph', 'aria-hidden': 'true' }, (a.title || '?').trim().charAt(0).toUpperCase()), h('span', { class: 'app-pick-t' }, a.title))));
+  };
+  if (apps.length) drawPick();
+  const shelfBox = apps.length ? h('div', { class: 'field' }, h('span', { class: 'label' }, 'Pick from my app shelf'), grid, pickNote, h('span', { class: 'hint' }, 'Or type any web link below.')) : null;
+  const el = h('div', null, shelfBox,
     h('div', { class: 'field' }, h('label', { for: 'lk-u' }, 'Web link'), u, h('span', { class: 'hint' }, 'The web app or page the students open. It opens in a new tab.')),
     h('div', { class: 'field' }, h('label', { for: 'lk-n' }, 'Message for students'), n, h('span', { class: 'hint' }, 'You can change this text. Students read it before they open the link.')),
     h('div', { class: 'field' }, h('label', { for: 'lk-c' }, 'Cover picture (optional)'), file, h('span', { class: 'hint' }, 'A screenshot of the app, so students recognise it on their shelf.'),
@@ -253,13 +267,13 @@ export function linkFields({ url = '', note = null, editing = false } = {}) {
       if (!validUrl(url)) { u.focus(); throw new Error('That link does not look right. It should look like https://example.com/game'); }
       const note = n.value.trim();
       try { localStorage.setItem('bem-link-note', note); } catch (e) { /* fine */ }
-      return { url, note, coverFile: (file.files && file.files[0]) || null, dropCover: drop.checked };
+      return { url, note, coverFile: (file.files && file.files[0]) || picked || null, dropCover: drop.checked };
     },
   };
 }
-export function editLinkDialog({ sb, board, onSaved }) {
+export function editLinkDialog({ sb, board, apps = [], onSaved }) {
   const title = h('input', { class: 'input', id: 'lk-t', value: board.title, maxlength: '120' });
-  const f = linkFields({ url: board.link_url || '', note: board.link_note || '', editing: true });
+  const f = linkFields({ url: board.link_url || '', note: board.link_note || '', editing: true, apps, onPick: a => { if (a.title && !title.value.trim()) title.value = a.title; } });
   const err = h('p', { class: 'error', role: 'alert' });
   const go = h('button', { class: 'btn primary' }, 'Save');
   const m = modal({ title: 'Link task', body: h('div', null, h('div', { class: 'field' }, h('label', { for: 'lk-t' }, 'Name'), title), f.el, err), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go] });

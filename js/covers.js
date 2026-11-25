@@ -54,8 +54,8 @@ export async function fillCovers(sb, ids) {
 }
 
 // a picture chosen by the teacher for a link task: cut to an upright sheet (like the other covers), small enough to send to every student
-export async function portraitCover(file) {
-  const url = URL.createObjectURL(file);
+export async function portraitCover(file) {      // a picture file, or a picture already held as a data address
+  const url = typeof file === 'string' ? file : URL.createObjectURL(file);
   try {
     const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('That file is not a picture.')); i.src = url; });
     const w = 320, hh = 453, c = document.createElement('canvas'); c.width = w; c.height = hh;
@@ -64,7 +64,7 @@ export async function portraitCover(file) {
     g.drawImage(img, (w - dw) / 2, (hh - dh) / 2, dw, dh);
     for (let q = 0.82; q >= 0.4; q -= 0.1) { const d = c.toDataURL('image/jpeg', q); if (d.length <= 200000) return d; }
     return c.toDataURL('image/jpeg', 0.35);
-  } finally { URL.revokeObjectURL(url); }
+  } finally { if (typeof file !== 'string') URL.revokeObjectURL(url); }
 }
 export async function saveCoverImage(sb, boardId, image) {
   if (!image) { const { error } = await sb.from('board_covers').delete().eq('board_id', boardId); if (error) throw error; cache.delete(boardId); return; }

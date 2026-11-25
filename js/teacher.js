@@ -263,7 +263,7 @@ export class TeacherApp {
       if (error) return toast(friendlyError(error), 'bad');
       b.link_enabled = val; sw.setAttribute('aria-checked', String(val)); sw.lastChild.textContent = val ? 'Link on' : 'Link off';
     });
-    const isLink = !!b.link_url, openIt = () => { if (isLink) editLinkDialog({ sb: this.sb, board: b, onSaved: () => this.refresh() }); else location.hash = '#/board/' + b.id; };
+    const isLink = !!b.link_url, openIt = () => { if (isLink) editLinkDialog({ sb: this.sb, board: b, apps: this.apps || [], onSaved: () => this.refresh() }); else location.hash = '#/board/' + b.id; };
     return h('div', { class: 'board-row' + (b.mode === 'assignment' || isLink ? ' assign' : '') },
       h('div', null,
         h('button', { class: 'title', onclick: openIt }, b.title),
@@ -763,7 +763,7 @@ export class TeacherApp {
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
     const startField = h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Students can see it from (optional)'), startIn, h('span', { class: 'hint' }, 'Leave empty to show it now. Until that time students do not see it at all. You always see it.'));
     const dates = h('div', { hidden: true }, h('div', { class: 'field' }, h('label', { for: 'bd' }, 'Due at (optional)'), dueIn, h('span', { class: 'hint' }, 'After the due time students can still look but cannot change their work.')));
-    const lf = linkFields(), linkBox = h('div', { hidden: true }, lf.el);
+    const lf = linkFields({ apps: this.apps || [], onPick: a => { if (a.title && !title.value.trim()) title.value = a.title; } }), linkBox = h('div', { hidden: true }, lf.el);
     const modeHint = h('span', { class: 'hint' });
     const modeSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Type of board' });
     const drawMode = () => {
