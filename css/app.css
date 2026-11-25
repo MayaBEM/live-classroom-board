@@ -1006,3 +1006,18 @@ input, textarea, select { font-size: max(16px, 1em); }
 .over-hint { position: absolute; left: 50%; transform: translateX(-50%); z-index: 30; padding: 8px 16px; background: var(--ink); color: #fff; font-size: 16px; font-weight: 600; pointer-events: none; white-space: nowrap; border: 2px solid #fff; }
 .over-hint.next { bottom: 64px; } .over-hint.prev { top: 66px; }
 .over-hint.ready { background: var(--orange); color: var(--ink); border-color: var(--ink); }
+
+/* the little colour / size panel: compact (still easy to tap) */
+.b-pop { gap: 8px; padding: 5px 8px; }
+.b-pop .grp { gap: 5px; }
+.b-pop .grp.wrap { gap: 8px; row-gap: 8px; padding: 2px 4px; }
+.b-pop .sw, .b-pop .sw.custom { width: 26px; height: 26px; border-width: 1.5px; }
+.b-pop .sw.custom { font-size: 18px; }
+.b-pop .sw[aria-pressed="true"] { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--ink); }
+.b-pop .sz { width: 36px; height: 26px; }
+.b-pop .sz i { width: 20px; }
+.b-pop .stampbtn { width: 54px; height: 32px; }
+.b-pop .btn, .b-pop .btn.sm { min-height: 26px; height: 26px; padding: 0 10px; font-size: 13px; }
+.b-pop .sep { height: 20px; }
+.b-pop .note { font-size: 13px; }
+@media (pointer: coarse) { .b-pop .sw, .b-pop .sw.custom { width: 28px; height: 28px; } .b-pop .sz { height: 28px; } .b-pop .btn, .b-pop .btn.sm { min-height: 28px; height: 28px; } }
