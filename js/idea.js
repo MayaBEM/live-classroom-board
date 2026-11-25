@@ -10,6 +10,14 @@ export const STUDENT_INK = ['#1D2127', '#1F5FBF', '#D62F2F', '#1F8A4C', '#EE7A1C
 const HEX = /^#[0-9a-fA-F]{6}$/;    // a colour a person chose with the colour picker is saved as "#RRGGBB"
 export const TEACHER_INK = '#7B2CBF';
 
+// ---- typed text with a little animation to catch the eye. A text is kept in the same list as the strokes:  { t: 'text', x, y, s (size, out of 1000 across), c (colour), txt, a (animation) }
+export const TEXT_ANIMS = [['none', 'Still'], ['bounce', 'Bounce'], ['wiggle', 'Wiggle'], ['pulse', 'Pulse'], ['wave', 'Wave'], ['rainbow', 'Rainbow'], ['blink', 'Blink']];
+const ANIM_OK = new Set(TEXT_ANIMS.map(a => a[0]));
+const TEXT_SIZES = [['S', 38], ['M', 58], ['L', 88]];
+const MAX_TEXT = 80;
+const isText = s => s && s.t === 'text' && typeof s.txt === 'string';
+const RAINBOW = ['#D62F2F', '#EE7A1C', '#E0A800', '#1F8A4C', '#1F5FBF', '#7A3FA0'];
+
 const ERASE_R = 34;      // how close the eraser must be to a line (out of 1000)
 const MIN_STEP = 2;      // ignore points closer than this (out of 1000)
 const MAX_POINTS = 4000; // one stroke never gets longer than this many numbers
@@ -75,13 +83,16 @@ export class IdeaBoard {
     Object.assign(this, { strokes: [], other: [], ink: STUDENT_INK, otherInk: TEACHER_INK, readonly: false, onChange: null, label: '', compact: false }, opts);
     this.strokes = (this.strokes || []).slice(); this.other = (this.other || []).slice();
     this.tool = 'pen'; this.colour = 0; this.cur = null; this.down = null; this.clearArmed = false; this.rect = null; this.pred = null;
+    this.textAnim = 'bounce'; this.textSize = 58; this.editor = null; this.textSig = '';
     this.touches = new Map(); this.redoStack = []; this.hist = []; this.erasedSnap = false; this.tap = new TwoFingerTap(); this.palmAt = -1e9;
     this.canvas = h('canvas', { class: 'idea-canvas', 'aria-label': this.label || 'Drawing board', role: 'img' });
     this.ctx = this.canvas.getContext('2d');
+    this.texts = h('div', { class: 'idea-texts', 'aria-hidden': 'true' });        // typed text (with its animation) sits above the lines
     this.live = h('canvas', { class: 'idea-live', 'aria-hidden': 'true' });       // the stroke being written, on top
     try { this.lctx = this.live.getContext('2d', { desynchronized: true }); } catch (e) { this.lctx = this.live.getContext('2d'); }
     this.bar = this.readonly ? null : this.buildBar();
-    this.el = h('div', { class: 'idea-board' + (this.compact ? ' compact' : '') }, this.bar, h('div', { class: 'idea-sheet' }, this.canvas, this.live));
+    this.textBar = this.readonly ? null : this.buildTextBar();
+    this.el = h('div', { class: 'idea-board' + (this.compact ? ' compact' : '') }, this.bar, this.textBar, h('div', { class: 'idea-sheet' }, this.canvas, this.texts, this.live));
     if (!this.readonly) this.attach();
     if (window.ResizeObserver) { this.ro = new ResizeObserver(() => { this.rect = null; this.draw(); }); this.ro.observe(this.canvas); }
     this.unsub = this.readonly ? null : pencil.subscribe(() => this.refreshBar());
@@ -90,18 +101,19 @@ export class IdeaBoard {
 
   buildBar() {
     const mk = (cls, label, icon, fn) => h('button', { type: 'button', class: 'ib ' + cls, 'aria-label': label, title: label, onclick: fn }, iconEl(icon, 16));
-    this.btnPen = mk('pen', 'Pen', 'pen', () => { this.tool = 'pen'; this.refreshBar(); });
-    this.btnErase = mk('erase', 'Eraser', 'eraser', () => { this.tool = 'eraser'; this.refreshBar(); });
+    this.btnPen = mk('pen', 'Pen', 'pen', () => { this.tool = 'pen'; this.closeEditor(true); this.refreshBar(); });
+    this.btnText = mk('text', 'Type text', 'text', () => { this.tool = 'text'; this.refreshBar(); });
+    this.btnErase = mk('erase', 'Eraser', 'eraser', () => { this.tool = 'eraser'; this.closeEditor(true); this.refreshBar(); });
     this.btnUndo = mk('undo', 'Undo', 'undo', () => this.undo());
     this.btnClear = mk('clear', 'Clear my writing', 'trash', () => this.clear());
     this.btnPencil = mk('pencilonly', 'Pencil only', 'hand', () => pencil.toggle());
-    this.dots = Array.isArray(this.ink) ? this.ink.slice(0, 4).map((c, i) => { const d = h('button', { type: 'button', class: 'ib dot', 'aria-label': 'Colour ' + (i + 1), onclick: () => { this.colour = i; this.tool = 'pen'; this.refreshBar(); } }); d.style.setProperty('--c', c); return d; }) : [];
+    this.dots = Array.isArray(this.ink) ? this.ink.slice(0, 4).map((c, i) => { const d = h('button', { type: 'button', class: 'ib dot', 'aria-label': 'Colour ' + (i + 1), onclick: () => { this.colour = i; if (this.tool !== 'text') this.tool = 'pen'; this.refreshBar(); this.restyleEditor(); } }); d.style.setProperty('--c', c); return d; }) : [];
     // any colour of your own
     this.picker = h('input', { type: 'color', class: 'sw-input', 'aria-label': 'Choose any colour', value: '#1f5fbf' });
-    this.picker.addEventListener('input', () => { this.colour = this.picker.value; this.tool = 'pen'; this.refreshBar(); });
-    this.picker.addEventListener('change', () => { this.colour = this.picker.value; this.tool = 'pen'; this.refreshBar(); });
+    this.picker.addEventListener('input', () => { this.colour = this.picker.value; if (this.tool !== 'text') this.tool = 'pen'; this.refreshBar(); this.restyleEditor(); });
+    this.picker.addEventListener('change', () => { this.colour = this.picker.value; if (this.tool !== 'text') this.tool = 'pen'; this.refreshBar(); this.restyleEditor(); });
     this.btnCustom = h('label', { class: 'ib dot custom', title: 'Choose any colour' }, this.picker, h('span', { 'aria-hidden': 'true' }, '+'));
-    const bar = h('div', { class: 'idea-bar' }, this.label ? h('span', { class: 'idea-label' }, this.label) : null, this.btnPen, this.dots, this.btnCustom, this.btnErase, this.btnUndo, this.btnClear, this.btnPencil);
+    const bar = h('div', { class: 'idea-bar' }, this.label ? h('span', { class: 'idea-label' }, this.label) : null, this.btnPen, this.btnText, this.dots, this.btnCustom, this.btnErase, this.btnUndo, this.btnClear, this.btnPencil);
     // a resting hand must not press the colours or the other buttons while the pencil is writing
     const block = e => { if (e.pointerType === 'touch' && (pencil.recent() || this.down !== null && this.downType === 'pen')) { e.preventDefault(); e.stopPropagation(); this.palmAt = performance.now(); } };
     bar.addEventListener('pointerdown', block, true);
@@ -112,15 +124,96 @@ export class IdeaBoard {
 
   refreshBar() {
     if (!this.btnPen) return;
-    this.btnPen.setAttribute('aria-pressed', String(this.tool === 'pen')); this.btnErase.setAttribute('aria-pressed', String(this.tool === 'eraser'));
-    this.dots.forEach((d, i) => d.setAttribute('aria-pressed', String(this.tool === 'pen' && this.colour === i)));
-    if (this.btnCustom) { const on = this.tool === 'pen' && typeof this.colour === 'string'; this.btnCustom.setAttribute('aria-pressed', String(on)); this.btnCustom.style.setProperty('--c', on ? this.colour : '#fff'); }
+    this.btnPen.setAttribute('aria-pressed', String(this.tool === 'pen')); this.btnErase.setAttribute('aria-pressed', String(this.tool === 'eraser')); this.btnText.setAttribute('aria-pressed', String(this.tool === 'text'));
+    if (this.textBar) this.textBar.hidden = this.tool !== 'text';
+    this.dots.forEach((d, i) => d.setAttribute('aria-pressed', String(this.tool !== 'eraser' && this.colour === i)));
+    if (this.btnCustom) { const on = this.tool !== 'eraser' && typeof this.colour === 'string'; this.btnCustom.setAttribute('aria-pressed', String(on)); this.btnCustom.style.setProperty('--c', on ? this.colour : '#fff'); }
     this.btnClear.classList.toggle('armed', this.clearArmed);
     this.btnClear.setAttribute('aria-label', this.clearArmed ? 'Tap again to clear' : 'Clear my writing');
     const only = pencil.only;
     this.btnPencil.setAttribute('aria-pressed', String(only));
     this.btnPencil.setAttribute('aria-label', only ? 'Pencil only is on. Fingers do not write. Tap to let fingers write' : 'Pencil only is off. Tap to write with the pencil only');
     this.btnPencil.title = only ? 'Pencil only: ON (fingers do not write)' : 'Pencil only: OFF (fingers write)';
+  }
+
+  // the second row, shown while "Type text" is chosen: how big, and which little animation
+  buildTextBar() {
+    const row = h('div', { class: 'idea-textbar', hidden: true });
+    const draw = () => {
+      row.replaceChildren(
+        h('span', { class: 'idea-tb-l' }, 'Size'),
+        ...TEXT_SIZES.map(([lbl, v]) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(this.textSize === v), onmousedown: e => e.preventDefault(), onclick: () => { this.textSize = v; draw(); this.restyleEditor(); } }, lbl)),
+        h('span', { class: 'idea-tb-l' }, 'Move'),
+        ...TEXT_ANIMS.map(([k, lbl]) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(this.textAnim === k), onmousedown: e => e.preventDefault(), onclick: () => { this.textAnim = k; draw(); this.restyleEditor(); } }, lbl)));
+    };
+    this.redrawTextBar = draw; draw();
+    return row;
+  }
+  colourOf(item, inks) { return Array.isArray(inks) ? (typeof item.c === 'string' ? (HEX.test(item.c) ? item.c : inks[0]) : (inks[item.c] || inks[0])) : inks; }
+
+  // typed texts are real text on the page (so they stay sharp and can move); they are rebuilt only when a text changes or the board is resized
+  renderTexts(W) {
+    const mine = this.strokes.filter(isText).map(t => [t, this.ink]), theirs = this.other.filter(isText).map(t => [t, this.otherInk]);
+    const sig = W + '|' + JSON.stringify([...theirs, ...mine].map(([t]) => t)) + '|' + (this.editor && this.editor.item ? this.strokes.indexOf(this.editor.item) : -1);
+    if (sig === this.textSig) return; this.textSig = sig;
+    this.texts.style.setProperty('--u', (W / 1000) + 'px');
+    const els = [];
+    for (const [t, inks] of [...theirs, ...mine]) {
+      if (this.editor && this.editor.item === t) continue;                                 // the one being edited is shown by the editor
+      const x = Math.min(990, Math.max(0, +t.x || 0)), y = Math.min(990, Math.max(0, +t.y || 0)), size = Math.min(200, Math.max(20, +t.s || 58)), a = ANIM_OK.has(t.a) ? t.a : 'none';
+      const txt = t.txt.slice(0, MAX_TEXT), col = this.colourOf(t, inks);
+      const el = h('div', { class: 'idea-t it-' + a, style: { left: x / 10 + '%', top: y / 10 + '%', fontSize: `calc(var(--u) * ${size})`, color: col, maxWidth: `calc(var(--u) * ${1000 - x})` } });
+      if (a === 'wave' || a === 'rainbow') {
+        let i = 0;
+        txt.split(' ').forEach((word, wi) => {
+          if (wi) el.append(' ');
+          const w = h('span', { class: 'it-w' });
+          for (const ch of word) { const l = h('span', { class: 'it-l', style: { '--i': i++ } }, ch); if (a === 'rainbow') l.style.setProperty('--rc', RAINBOW[(i - 1) % RAINBOW.length]); w.append(l); }
+          el.append(w);
+        });
+      } else el.textContent = txt;
+      el._item = t; els.push(el);
+    }
+    if (this.editor) els.push(this.editor.input);
+    this.texts.replaceChildren(...els);
+  }
+  // the text (if any) under a point of the sheet (0..1000 across and down)
+  textAt(x, y) {
+    const r = this.rect || (this.rect = this.canvas.getBoundingClientRect()), cx = r.left + x / 1000 * r.width, cy = r.top + y / 1000 * r.height;
+    for (const el of [...this.texts.children].reverse()) { const b = el.getBoundingClientRect(); if (cx >= b.left - 4 && cx <= b.right + 4 && cy >= b.top - 4 && cy <= b.bottom + 4) return el._item; }
+    return null;
+  }
+  openEditor(x, y, item = null) {
+    this.closeEditor(true);
+    if (item && !this.strokes.includes(item)) return;                                      // (only your own writing can be changed)
+    if (item) { this.textAnim = ANIM_OK.has(item.a) ? item.a : 'none'; this.textSize = item.s; this.colour = item.c; this.refreshBar(); this.redrawTextBar(); }
+    const input = h('input', { type: 'text', class: 'idea-edit', maxlength: String(MAX_TEXT), 'aria-label': 'Type your text', autocomplete: 'off', autocapitalize: 'sentences', value: item ? item.txt : '' });
+    this.editor = { x, y, item, input }; this.textSig = '';
+    this.restyleEditor(); this.draw();
+    this.texts.append(input); input.style.pointerEvents = 'auto';
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.closeEditor(true); } else if (e.key === 'Escape') { this.closeEditor(false); } });
+    input.addEventListener('blur', () => setTimeout(() => { if (this.editor && this.editor.input === input) this.closeEditor(true); }, 120));
+    input.addEventListener('pointerdown', e => e.stopPropagation());
+    setTimeout(() => { input.focus(); }, 0);
+  }
+  restyleEditor() {
+    const ed = this.editor; if (!ed) return;
+    const [W] = this.size(), col = this.colourOf({ c: this.colour }, this.ink), px = Math.max(16, this.textSize * W / 1000);   // (16px at least, or iPads zoom in)
+    Object.assign(ed.input.style, { left: ed.x / 10 + '%', top: ed.y / 10 + '%', fontSize: px + 'px', color: col, maxWidth: ((1000 - ed.x) / 10) + '%' });
+    ed.input.style.width = Math.max(120, Math.min(W * (1000 - ed.x) / 1000, W)) + 'px';
+    if (document.activeElement !== ed.input) ed.input.focus();
+  }
+  closeEditor(save) {
+    const ed = this.editor; if (!ed) return; this.editor = null; ed.input.remove(); this.textSig = '';
+    const txt = ed.input.value.trim().slice(0, MAX_TEXT);
+    if (save) {
+      const item = txt ? { t: 'text', x: ed.x, y: ed.y, s: this.textSize, c: this.colour, txt, a: this.textAnim } : null;
+      if (ed.item) {
+        if (item) item.x = ed.item.x, item.y = ed.item.y;
+        if (!item || JSON.stringify(item) !== JSON.stringify(ed.item)) { this.hist.push(this.strokes.slice()); this.strokes = this.strokes.flatMap(x => x === ed.item ? (item ? [item] : []) : [x]); this.redoStack = []; this.draw(); this.changed(); return; }
+      } else if (item) { this.hist.push(this.strokes.slice()); this.strokes = [...this.strokes, item]; this.redoStack = []; this.draw(); this.changed(); return; }
+    }
+    this.draw();
   }
 
   // ---- drawing on screen
@@ -140,6 +233,7 @@ export class IdeaBoard {
     const wpx = this.widthPx(W);
     drawStrokes(ctx, this.other, this.otherInk, W, H, wpx);
     drawStrokes(ctx, this.strokes, this.ink, W, H, wpx);
+    this.renderTexts(W);
     this.drawLive();
   }
   widthPx(W) { return Math.max(1.6, 2.4 * W / 250); }
@@ -180,13 +274,14 @@ export class IdeaBoard {
           this.tap.down(this.touches);
           e.preventDefault(); return;
         }
-        if (pencil.only) { e.preventDefault(); return; }                           // Pencil only: a finger does not write
+        if (pencil.only && this.tool !== 'text') { e.preventDefault(); return; }  // Pencil only: a finger does not write (but it may tap to place typed text)
       }
       if (this.down !== null && performance.now() - this.downAt < 8000) return;
       e.preventDefault(); this.down = e.pointerId; this.downType = e.pointerType; this.downAt = performance.now(); this.clearArmed = false; this.refreshBar();
       try { c.setPointerCapture(e.pointerId); } catch (x) { /* fine */ }
       const [x, y] = this.pos(e);
       if (this.tool === 'eraser') { this.erased = false; this.erasedSnap = false; this.eraseAt(x, y); }
+      else if (this.tool === 'text') { this.textTap = { x, y, cx: e.clientX, cy: e.clientY }; }
       else { this.cur = { c: this.colour, p: [x, y] }; this.straight = false; this.drawLive(); }
     });
     c.addEventListener('pointermove', e => {
@@ -195,6 +290,7 @@ export class IdeaBoard {
       if (this.holdId === e.pointerId && Math.hypot(e.clientX - this.holdXY[0], e.clientY - this.holdXY[1]) > 22) this.cancelHold();
       if (this.down !== e.pointerId) return; e.preventDefault();
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+      if (this.tool === 'text') return;
       for (const ev of (evs.length ? evs : [e])) {
         const [x, y] = this.pos(ev);
         if (this.tool === 'eraser') this.eraseAt(x, y);
@@ -224,7 +320,10 @@ export class IdeaBoard {
       if (this.down !== e.pointerId) return;
       const cancelled = e.type === 'pointercancel';
       this.downTypeWas = this.downType; this.down = null; this.downType = null;
-      if (this.tool === 'eraser') { if (this.erased) this.changed(); }
+      if (this.tool === 'text') {
+        const tt = this.textTap; this.textTap = null;
+        if (tt && !cancelled && Math.hypot(e.clientX - tt.cx, e.clientY - tt.cy) < 14) { const hit = this.textAt(tt.x, tt.y); this.openEditor(tt.x, tt.y, hit && this.strokes.includes(hit) ? hit : null); }
+      } else if (this.tool === 'eraser') { if (this.erased) this.changed(); }
       else if (this.cur) {
         const s = this.cur; this.cur = null; this.pred = null;
         if (!cancelled) { this.hist.push(this.strokes.slice()); this.strokes.push(s); this.redoStack = []; this.lastStroke = this.downTypeWas === 'pen' ? s : null; this.lastStrokeAt = performance.now(); this.draw(); this.changed(); } else this.drawLive();
@@ -256,7 +355,8 @@ export class IdeaBoard {
   }
   eraseAt(x, y) {
     const out = []; let changed = false;
-    for (const s of this.strokes) { if (near(s, x, y)) { changed = true; out.push(...cutStroke(s, x, y)); } else out.push(s); }
+    const tx = this.textAt(x, y);
+    for (const s of this.strokes) { if (isText(s)) { if (s === tx) changed = true; else out.push(s); } else if (near(s, x, y)) { changed = true; out.push(...cutStroke(s, x, y)); } else out.push(s); }
     if (changed) { if (!this.erasedSnap) { this.hist.push(this.strokes.slice()); this.erasedSnap = true; } this.strokes = out; this.erased = true; this.redoStack = []; this.draw(); }
   }
   undo() { if (!this.hist.length) return; this.redoStack.push(this.strokes); this.strokes = this.hist.pop(); this.draw(); this.changed(); }
