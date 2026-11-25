@@ -36,6 +36,7 @@ function distPtSeg(px, py, a, b) {
 // colours a person chose with the colour picker, kept on this device
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem('bem-custom-colors') || '[]'); return Array.isArray(a) ? a.filter(isHex).slice(0, 8) : []; } catch (e) { return []; } };
 const saveRecent = a => { try { localStorage.setItem('bem-custom-colors', JSON.stringify(a)); } catch (e) { /* fine */ } };
+const OVER_TURN = 90;       // pixels pushed past the end of a page that turn it
 const MIN_S = 0.12, MAX_S = 8;
 
 export class BoardView {
@@ -580,11 +581,30 @@ export class BoardView {
   // is the whole width of the page on the screen? (then a sideways swipe means "turn the page", not "move the page")
   fitsAcross() { const { w } = this.stageSize(); return 1000 * this.view.s <= w - 24 + 1; }
   // go to the next or the previous page with a short slide, like paper; at the first or last page the sheet just nudges
-  turnPage(dir) {
+  turnPage(dir, vertical = false) {
     const before = this.pageId; this.goPage(dir);
     const moved = this.pageId !== before;
-    try { this.sheet.animate(moved ? [{ translate: `${dir * 70}px 0`, opacity: 0.25 }, { translate: '0 0', opacity: 1 }] : [{ translate: '0 0' }, { translate: `${-dir * 22}px 0` }, { translate: '0 0' }], { duration: moved ? 220 : 200, easing: 'ease-out' }); } catch (err) { /* older browsers: no slide */ }
+    const from = vertical ? `0 ${dir * 70}px` : `${dir * 70}px 0`, nudge = vertical ? `0 ${-dir * 22}px` : `${-dir * 22}px 0`;
+    try { this.sheet.animate(moved ? [{ translate: from, opacity: 0.25 }, { translate: '0 0', opacity: 1 }] : [{ translate: '0 0' }, { translate: nudge }, { translate: '0 0' }], { duration: moved ? 220 : 200, easing: 'ease-out' }); } catch (err) { /* older browsers: no slide */ }
   }
+  // Scrolling past the end of a page turns it (down past the bottom = next page, up past the top = the one before):
+  // how far the page was pushed beyond where it can go (+ = pushed up, towards the next page; - = pushed down, towards the previous one)
+  overY(rawTy, s) {
+    const pg = this.page; if (!pg) return 0;
+    const { h } = this.stageSize(), top = this.insetTop(), pad = 12, ph = pg.h * s, availH = h - top;
+    const fits = ph <= availH - pad + 1, lo = fits ? top + (availH - ph) / 2 : h - ph - pad, hi = fits ? lo : top;
+    return rawTy < lo ? lo - rawTy : rawTy > hi ? -(rawTy - hi) : 0;
+  }
+  // the page follows the finger a little beyond its edge, with a hint of what will happen when it is let go
+  showOver(over) {
+    const on = Math.abs(over) > 8, ready = Math.abs(over) >= OVER_TURN, ps = this.store.pages, i = ps.findIndex(p => p.id === this.pageId), dir = over > 0 ? 1 : -1, has = ps[i + dir];
+    this.sheet.style.translate = on ? `0 ${-Math.sign(over) * Math.min(70, Math.abs(over) * 0.35)}px` : '';
+    if (!on || !has) { if (this.overHint) { this.overHint.remove(); this.overHint = null; } return; }
+    if (!this.overHint) { this.overHint = h('div', { class: 'over-hint', 'aria-hidden': 'true' }); this.stage.append(this.overHint); }
+    this.overHint.className = 'over-hint ' + (dir > 0 ? 'next' : 'prev') + (ready ? ' ready' : '');
+    this.overHint.textContent = ready ? (dir > 0 ? 'Let go: next page' : 'Let go: page before') : (dir > 0 ? 'Keep going: next page' : 'Keep going: page before');
+  }
+  clearOver() { this.showOver(0); }
   goPage(d) {
     const ps = this.store.pages, i = ps.findIndex(p => p.id === this.pageId), n = clamp(i + d, 0, ps.length - 1);
     if (ps[n] && ps[n].id !== this.pageId) this.setPage(ps[n].id, { user: true });
@@ -1050,12 +1070,15 @@ export class BoardView {
         const rem = [...this.pointers.values()][0], g = this.g, cx = (e.clientX + rem.x) / 2, cy = (e.clientY + rem.y) / 2;
         const dx = cx - g.sx, dy = cy - g.sy, d = Math.hypot(e.clientX - rem.x, e.clientY - rem.y), ok = d / g.d > 0.8 && d / g.d < 1.25;
         if (ok && this.fitsAcross() && Math.abs(dx) > 80 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - g.t < 900) { g.swiped = true; this.turnPage(dx < 0 ? 1 : -1); }
+        else if (ok && g.over && Math.abs(g.over) >= OVER_TURN && Math.abs(dy) > 1.3 * Math.abs(dx)) { g.swiped = true; this.turnPage(g.over > 0 ? 1 : -1, true); }   // two fingers pushed past the end of the page: turn it
       }
-      if (this.pointers.size < 2) { this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem && this.tool === 'move') this.startPanFrom(rem); }
+      if (this.pointers.size < 2) { this.clearOver(); this.g = null; this.suppress = true; const rem = [...this.pointers.values()][0]; if (rem && this.tool === 'move') this.startPanFrom(rem); }
       return;
     }
     if (this.pan) {
-      const P = this.pan, moved = P.moved, tool = this.tool; this.pan = null; this.stage.classList.remove('panning');
+      const P = this.pan, moved = P.moved, tool = this.tool; this.pan = null; this.stage.classList.remove('panning'); this.clearOver();
+      // pushed past the bottom (or top) of the page and let go: turn the page, like scrolling on to the next one
+      if (!cancelled && e.pointerType !== 'mouse' && P.over && Math.abs(P.over) >= OVER_TURN && Math.abs(e.clientY - P.y) > 1.3 * Math.abs(e.clientX - P.x)) { this.turnPage(P.over > 0 ? 1 : -1, true); return; }
       // a quick sideways swipe of a finger or pencil turns the page, like paper (only when the whole page is across the screen)
       if (!cancelled && e.pointerType !== 'mouse' && P.t) { const dx = e.clientX - P.x, dy = e.clientY - P.y; if (this.fitsAcross() && Math.abs(dx) > 80 && Math.abs(dx) > 2 * Math.abs(dy) && performance.now() - P.t < 700) { this.turnPage(dx < 0 ? 1 : -1); return; } }
       if (!moved && !cancelled && tool === 'move' && !this.pointers.size) this.whoWrote(this.toPage(e), e);
@@ -1259,7 +1282,7 @@ export class BoardView {
   updatePan(e) {
     const p = this.pan, dx = e.clientX - p.x, dy = e.clientY - p.y;
     if (!p.moved && Math.hypot(dx, dy) < 6) return;
-    p.moved = true; this.view.tx = p.tx + dx; this.view.ty = p.ty + dy; this.applyView();
+    p.moved = true; this.view.tx = p.tx + dx; this.view.ty = p.ty + dy; p.over = this.overY(this.view.ty, this.view.s); this.applyView(); this.showOver(p.over);
   }
   startGesture() {
     this.userMoved(); this.autoFit = false; this.pan = null;
@@ -1270,12 +1293,22 @@ export class BoardView {
     const [a, b] = [...this.pointers.values()], r = this.stage.getBoundingClientRect(), g = this.g;
     const cx = (a.x + b.x) / 2 - r.left, cy = (a.y + b.y) / 2 - r.top, d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
     const ns = clamp(g.v.s * d / g.d, MIN_S, MAX_S), px = (g.cx - g.v.tx) / g.v.s, py = (g.cy - g.v.ty) / g.v.s;
-    this.view = { s: ns, tx: cx - px * ns, ty: cy - py * ns }; this.applyView();
+    this.view = { s: ns, tx: cx - px * ns, ty: cy - py * ns };
+    g.over = Math.abs(ns / g.v.s - 1) < 0.12 ? this.overY(this.view.ty, ns) : 0;     // (only while the fingers are moving together, not while zooming)
+    this.applyView(); this.showOver(g.over);
   }
   onWheel(e) {
     e.preventDefault(); this.userMoved(); this.autoFit = false;
-    if (e.ctrlKey || e.metaKey) { const p = this.stagePt(e); this.zoomAt(Math.exp(-e.deltaY * 0.012), p.x, p.y); }
-    else { this.view.tx -= e.deltaX; this.view.ty -= e.deltaY; this.applyView(); }
+    if (e.ctrlKey || e.metaKey) { const p = this.stagePt(e); this.zoomAt(Math.exp(-e.deltaY * 0.012), p.x, p.y); return; }
+    const now = performance.now(), over = Math.abs(e.deltaY) > Math.abs(e.deltaX) ? this.overY(this.view.ty - e.deltaY, this.view.s) : 0;
+    this.view.tx -= e.deltaX; this.view.ty -= e.deltaY; this.applyView();
+    // scrolling on past the end of the page (a trackpad or wheel): keep scrolling and the next (or the previous) page comes
+    if (now < (this.wCool || 0)) { this.wCool = now + 250; return; }          // right after a turn the rest of the scroll is ignored until it goes quiet
+    if (!over) { this.wOver = 0; this.showOver(0); return; }
+    if (this.wOver && Math.sign(this.wOver) !== Math.sign(over)) this.wOver = 0;
+    this.wOver = (this.wOver || 0) + over; clearTimeout(this.wTimer); this.wTimer = setTimeout(() => { this.wOver = 0; this.showOver(0); }, 260);
+    this.showOver(this.wOver);
+    if (Math.abs(this.wOver) >= OVER_TURN * 1.6) { const dir = this.wOver > 0 ? 1 : -1; this.wOver = 0; this.wCool = now + 900; this.showOver(0); this.turnPage(dir, true); }
   }
 
   onKey(e) {
