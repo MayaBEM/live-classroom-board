@@ -3,7 +3,7 @@ import { h, uuid, makeCode, modal, toast } from './util.js';
 import { BUCKET, friendlyError } from './db.js';
 import { pdfFromFile, pdfInfo } from './pdf.js';
 import { iconEl } from './icons.js';
-import { saveCover, portraitCover, saveCoverImage } from './covers.js';
+import { saveCover, squareCover, saveCoverImage } from './covers.js';
 import { validUrl, appThumb } from './shelf.js';
 import { shortTitle } from './library.js';
 import { CONFIG } from '../config.js';
@@ -89,7 +89,7 @@ export async function createBoard(sb, { title, classId, spec, mode = 'live', sta
   }
   if (!board) throw new Error('Could not make a short code. Try again.');
   if (link) {                      // a link task has no pages: only the address, the message and (maybe) a cover picture
-    try { if (link.coverFile) await saveCoverImage(sb, board.id, await portraitCover(link.coverFile)); } catch (e) { /* the cover picture is a nice extra */ }
+    try { if (link.coverFile) await saveCoverImage(sb, board.id, await squareCover(link.coverFile)); } catch (e) { /* the cover picture is a nice extra */ }
     return board;
   }
   try { await addPagesToBoard(sb, board.id, 0, spec, progress); }
@@ -284,7 +284,7 @@ export function editLinkDialog({ sb, board, apps = [], onSaved }) {
       const v = f.values();
       const { error } = await sb.from('boards').update({ title: t, link_url: v.url, link_note: v.note || null }).eq('id', board.id);
       if (error) throw error;
-      if (v.coverFile) await saveCoverImage(sb, board.id, await portraitCover(v.coverFile)); else if (v.dropCover) await saveCoverImage(sb, board.id, null);
+      if (v.coverFile) await saveCoverImage(sb, board.id, await squareCover(v.coverFile)); else if (v.dropCover) await saveCoverImage(sb, board.id, null);
       m.close(); toast('Saved.', 'ok'); onSaved && onSaved();
     } catch (e) { err.textContent = friendlyError(e); go.disabled = false; }
   });

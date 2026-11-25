@@ -42,10 +42,10 @@ const whenShort = iso => new Date(iso).toLocaleString(undefined, { weekday: 'sho
 function bookEl(b, { fresh, idx, onOpen }) {
   const [label, cls] = STATUS[b.status] || STATUS.new, locked = !b.code && !b.link_url, d = dueInfo(b.due_at, b.status);
   const ph = h('span', { class: 'book-ph ' + TILE[idx % TILE.length] }, (b.title || '').trim());
-  const ribbon = b.status === 'checked' ? ['checked', 'Checked' + (b.score ? ` · ${b.score}` : '')] : b.status === 'sent' ? ['sent', 'Sent'] : b.link_url ? ['link', 'Web link'] : locked ? ['lock', b.starts_at ? 'Opens ' + whenShort(b.starts_at) : 'Not open yet'] : null;
-  const el = h('button', { class: 'book ' + cls + (fresh ? ' is-new' : '') + (locked ? ' locked' : ''), disabled: locked, title: b.title, 'aria-label': (b.title || 'Work') + '. ' + label },
-    h('span', { class: 'book-top' }, h('span', { class: 'book-face' }, bookCover(b.id, ph), fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, ribbon ? h('span', { class: 'book-ribbon ' + ribbon[0] }, ribbon[1]) : null)),
-    h('span', { class: 'book-title' }, b.title), d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null);
+  const ribbon = b.status === 'checked' ? ['checked', 'Checked' + (b.score ? ` · ${b.score}` : '')] : b.status === 'sent' ? ['sent', 'Sent'] : locked && !b.link_url ? ['lock', b.starts_at ? 'Opens ' + whenShort(b.starts_at) : 'Not open yet'] : null;
+  const el = h('button', { class: 'book ' + cls + (fresh ? ' is-new' : '') + (locked ? ' locked' : '') + (b.link_url ? ' is-link' : ''), disabled: locked, title: b.title, 'aria-label': (b.title || 'Work') + '. ' + label },
+    h('span', { class: 'book-top' }, h('span', { class: 'book-slot' }, h('span', { class: 'book-face' }, bookCover(b.id, ph), fresh ? h('span', { class: 'new-badge' }, 'NEW') : null, ribbon ? h('span', { class: 'book-ribbon ' + ribbon[0] }, ribbon[1]) : null))),
+    h('span', { class: 'book-title' }, b.title), b.link_url ? h('span', { class: 'link-chip' }, 'Web link') : null, d ? h('span', { class: 'due-chip ' + d.cls }, d.text) : null);
   el.addEventListener('click', async () => { if (el.classList.contains('busy')) return; el.classList.add('busy'); try { await onOpen(); } finally { el.classList.remove('busy'); } });
   return el;
 }

@@ -1033,3 +1033,11 @@ input, textarea, select { font-size: max(16px, 1em); }
 .app-pick-i[aria-pressed="true"] { border-color: var(--orange); background: #FFF1E4; }
 .app-pick-i .acover, .app-pick-i .aph { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: grid; place-items: center; background: #fff; border: 1px solid rgba(0,0,0,.2); font-weight: 600; font-size: 20px; }
 .app-pick-t { font-size: 12px; line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+
+/* every book stands on the shelf: an upright sheet is tall, a web link is a square (the web app's own screen), both sit on the plank */
+.book-slot { display: flex; align-items: flex-end; aspect-ratio: 210 / 297; }
+.book-slot .book-face { width: 100%; }
+.book.is-link .book-face { aspect-ratio: 1 / 1; }
+.book.is-link .book-cv img { object-fit: contain; }
+.book.is-link .book-ph { font-size: 17px; }
+.link-chip { align-self: flex-start; padding: 0 8px; font-size: 13px; font-weight: 600; background: var(--sky); border: 1px solid rgba(0,0,0,.35); }
