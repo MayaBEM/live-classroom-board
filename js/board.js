@@ -4,7 +4,7 @@ import { pencil, TwoFingerTap } from './pencil.js';
 import { pictureFromFile } from './picture.js';
 import { icon, iconEl } from './icons.js';
 import { drawObject, drawObjects, drawPatternBase, hit, bounds, simplify, layoutText, strokeInc, strokeTip,
-  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STAMP_COLORS, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER, DECOR } from './render.js';
+  PEN_COLORS, HL_COLORS, PEN_SIZES, HL_SIZES, TEXT_SIZES, FONT, TEXT_LH, STAMPS, STAMP_SIZES, STAMP_COLORS, STUDENT_ASSIGN_COLORS, onImagesReady, isRedish, isHex, UNDER, DECOR, HLAYER } from './render.js';
 import { STICKERS, STICKER_GROUPS, TAPES, drawSticker, drawTape } from './stickers.js';
 import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
@@ -82,7 +82,7 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.sel = new Set(); this.selDrag = null; this.lasso = null; this.recentColors = loadRecent();
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.sel = new Set(); this.selDrag = null; this.lasso = null; try { this.shapeFill = Math.min(2, Math.max(0, parseInt(localStorage.getItem('bem-shape-fill') || '0', 10) || 0)); } catch (e) { this.shapeFill = 0; } this.recentColors = loadRecent();
     this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.popOpen = true; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
@@ -481,6 +481,8 @@ export class BoardView {
         mine.map(hex => h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
         h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+'))));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
+      if (t === 'rect' || t === 'ellipse') kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Fill' },
+        [[0, 'Outline'], [1, 'Solid'], [2, 'See-through']].map(([k, label]) => h('button', { class: 'btn sm' + (this.shapeFill === k ? ' on' : ''), 'aria-pressed': String(this.shapeFill === k), title: k === 2 ? 'Colour like a highlighter: you can still read what is under it' : label, onclick: () => { this.shapeFill = k; try { localStorage.setItem('bem-shape-fill', String(k)); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
       if (t === 'pen' || t === 'highlighter') kids.push(h('span', { class: 'sep' }), h('button', { class: 'btn sm' + (pencil.straight ? ' on' : ''), 'aria-pressed': String(pencil.straight), title: 'While you draw with the pencil, rest one finger of your other hand on the screen to make the line straight', onclick: () => pencil.toggleStraight() }, 'Finger = straight line'));
     } else if (t === 'eraser') {
       kids.push(h('div', { class: 'grp', role: 'group', 'aria-label': 'Eraser type' }, [['part', 'Rub out a part'], ['whole', 'Remove a whole line']].map(([k, label]) =>
@@ -816,7 +818,7 @@ export class BoardView {
     const fp = this.focusPerson, list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && o.id !== this.hiddenId);
     const opt = o => (fp && o.participant_id !== fp ? { alpha: 0.18 } : undefined);
     for (const o of list) if (DECOR(o)) drawObject(uctx, o, opt(o));                       // pictures, stickers and tape at the bottom,
-    for (const o of list) if (o.type === 'highlighter') drawObject(hctx, o, opt(o));       // then highlighting (its own layer, multiplied onto the paper),
+    for (const o of list) if (HLAYER(o)) drawObject(hctx, o, opt(o));       // then highlighting (its own layer, multiplied onto the paper),
     for (const o of list) if (!UNDER(o)) drawObject(ctx, o, opt(o));                        // and the writing on top
     this.positionImgBox();
   }
@@ -1033,7 +1035,7 @@ export class BoardView {
       this.cur = { id: uuid(), type: 'tape', page_id: this.pageId, deleted: false, data: { k: this.tapeKind, w: TAPE_W[this.sizeIdx], x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
       this.requestLive();
     } else if (SHAPES.has(t)) {
-      this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y } };
+      this.cur = { id: uuid(), type: t, page_id: this.pageId, deleted: false, data: { c: this.color, s: PEN_SIZES[this.sizeIdx] * (t === 'line' || t === 'arrow' ? 1 : 1), x0: p.x, y0: p.y, x1: p.x, y1: p.y, ...((t === 'rect' || t === 'ellipse') && this.shapeFill ? { f: this.shapeFill } : {}) } };
       this.requestLive();
     } else if (t === 'image' || t === 'sticker') {
       const sel = this.imgSel && this.store.objs.get(this.imgSel), k = 1000 / (this.rectCache || this.sheet.getBoundingClientRect()).width;   // page units per screen pixel
@@ -1214,7 +1216,7 @@ export class BoardView {
     this.pushUndo({ t: 'create', id: o.id });
     this.lastStroke = (c.type === 'pen' || c.type === 'highlighter') && this.curByPen ? { id: o.id, t: performance.now() } : null;     // (for "hold a finger to make it straight")
     if (this.pageId === c.page_id) {
-      const ctx = (o.type === 'highlighter' ? this.cHl : UNDER(o) ? this.cUnder : this.cInk).getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
+      const ctx = (HLAYER(o) ? this.cHl : UNDER(o) ? this.cUnder : this.cInk).getContext('2d'); ctx.setTransform(this.q, 0, 0, this.q, 0, 0); drawObject(ctx, o);
     }
     this.clearStroke();
     this.thumbDirty(c.page_id);
@@ -1339,7 +1341,7 @@ export class BoardView {
   // what is under the finger: ink first, then highlighting, then pictures and stickers (the same order they are painted in)
   pickAt(p, r) {
     const list = this.store.pageObjects(this.pageId).filter(o => !o.deleted && this.store.canEdit(o));
-    const rank = o => DECOR(o) ? 0 : o.type === 'highlighter' ? 1 : 2;
+    const rank = o => DECOR(o) ? 0 : HLAYER(o) ? 1 : 2;
     const order = list.map((o, i) => [o, i]).sort((a, b) => rank(b[0]) - rank(a[0]) || b[1] - a[1]).map(x => x[0]);
     for (const o of order) if (hit(o, p.x, p.y, r)) return o;
     let best = null, area = Infinity;                       // a box or circle can also be picked from inside it (the smallest one under the finger)

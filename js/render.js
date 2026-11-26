@@ -178,14 +178,20 @@ export function drawObject(ctx, o, opts = {}) {
       break;
     }
     case 'rect': {
+      const rx = Math.min(d.x0, d.x1), ry = Math.min(d.y0, d.y1), rw = Math.abs(d.x1 - d.x0), rh = Math.abs(d.y1 - d.y0);
+      if (d.f === 2) { ctx.globalAlpha = (opts.alpha || 1) * 0.5; ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = d.c; ctx.fillRect(rx, ry, rw, rh); break; }   // see-through, like a highlighter: the words under it stay sharp
+      if (d.f === 1) { ctx.fillStyle = d.c; ctx.fillRect(rx, ry, rw, rh); }                                                                                            // solid
       ctx.strokeStyle = d.c; ctx.lineWidth = d.s; ctx.lineJoin = 'miter';
-      ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+      ctx.strokeRect(rx, ry, rw, rh);
       break;
     }
     case 'ellipse': {
       ctx.strokeStyle = d.c; ctx.lineWidth = d.s;
       const rx = Math.abs(d.x1 - d.x0) / 2, ry = Math.abs(d.y1 - d.y0) / 2;
-      ctx.beginPath(); ctx.ellipse((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, Math.max(rx, .5), Math.max(ry, .5), 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse((d.x0 + d.x1) / 2, (d.y0 + d.y1) / 2, Math.max(rx, .5), Math.max(ry, .5), 0, 0, Math.PI * 2);
+      if (d.f === 2) { ctx.globalAlpha = (opts.alpha || 1) * 0.5; ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = d.c; ctx.fill(); break; }
+      if (d.f === 1) { ctx.fillStyle = d.c; ctx.fill(); }
+      ctx.stroke();
       break;
     }
     case 'text': {
@@ -209,11 +215,13 @@ export function drawObject(ctx, o, opts = {}) {
 
 // Pictures, stickers, tape and highlighting sit UNDER the writing: pictures, stickers and tape first (in the order they were put down), then highlighters, then everything else (pen, text, shapes, stamps)
 export const DECOR = o => o.type === 'image' || o.type === 'sticker' || o.type === 'tape';
-export const UNDER = o => DECOR(o) || o.type === 'highlighter';
+// highlighting (and see-through shapes) is multiplied onto the paper, so the words under it stay black
+export const HLAYER = o => o.type === 'highlighter' || ((o.type === 'rect' || o.type === 'ellipse') && !!o.data && o.data.f === 2);
+export const UNDER = o => DECOR(o) || HLAYER(o);
 export function drawObjects(ctx, objs, skipId) {
   const list = objs.filter(o => !o.deleted && o.id !== skipId);
   for (const o of list) if (DECOR(o)) drawObject(ctx, o);
-  for (const o of list) if (o.type === 'highlighter') drawObject(ctx, o);
+  for (const o of list) if (HLAYER(o)) drawObject(ctx, o);
   for (const o of list) if (!UNDER(o)) drawObject(ctx, o);
 }
 
@@ -258,13 +266,14 @@ export function hit(o, x, y, r) {
     case 'line': case 'arrow': return distSeg(x, y, d.x0, d.y0, d.x1, d.y1) <= w;
     case 'rect': {
       const l = Math.min(d.x0, d.x1), rt = Math.max(d.x0, d.x1), t = Math.min(d.y0, d.y1), bt = Math.max(d.y0, d.y1);
+      if (d.f && x >= l - w && x <= rt + w && y >= t - w && y <= bt + w) return true;      // a filled box can be touched anywhere inside it
       return distSeg(x, y, l, t, rt, t) <= w || distSeg(x, y, rt, t, rt, bt) <= w || distSeg(x, y, rt, bt, l, bt) <= w || distSeg(x, y, l, bt, l, t) <= w;
     }
     case 'ellipse': {
       const cx = (d.x0 + d.x1) / 2, cy = (d.y0 + d.y1) / 2, rx = Math.abs(d.x1 - d.x0) / 2 || .5, ry = Math.abs(d.y1 - d.y0) / 2 || .5;
       const k = Math.hypot((x - cx) / rx, (y - cy) / ry);
       const tol = w / Math.min(rx, ry);
-      return Math.abs(k - 1) <= tol;
+      return d.f ? k <= 1 + tol : Math.abs(k - 1) <= tol;
     }
     case 'text': case 'stamp': case 'image': case 'sticker': return true;
     case 'tape': return distSeg(x, y, d.x0, d.y0, d.x1, d.y1) <= (d.w || 44) / 2 + r;
