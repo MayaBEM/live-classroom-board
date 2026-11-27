@@ -1127,3 +1127,5 @@ input, textarea, select { font-size: max(16px, 1em); }
 .sel-line { display: flex; gap: 6px; align-items: center; }
 .sel-line .input { flex: 1; min-width: 0; }
 .sel-n { margin-right: auto; font-size: 14px; }
+
+.linklike { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 32px; }

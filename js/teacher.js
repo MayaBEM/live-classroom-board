@@ -53,11 +53,67 @@ export class TeacherApp {
 
   async init() {
     addEventListener('hashchange', () => this.route());
+    if (await this.handleRecoveryLink()) return;          // the link from the "forgot password" email: choose a new password
     const { data: { session } } = await this.sb.auth.getSession();
     if (!session) return this.showLogin();
     const { data: ok, error } = await this.sb.rpc('is_teacher');
     if (error || !ok) { await this.sb.auth.signOut(); return this.showLogin('This account is not the teacher account.'); }
     this.route();
+  }
+
+  // ----------------------------------------------------------------- forgot password
+  // The email link brings the person back here with a one-time sign-in in the address (#access_token=...&type=recovery).
+  async handleRecoveryLink() {
+    const q = new URLSearchParams(location.hash.replace(/^#\/?/, '').replace(/^[^=]*\?/, ''));
+    if (q.get('type') !== 'recovery' || !q.get('access_token') || !q.get('refresh_token')) {
+      if (q.get('error_description') && /otp_expired|expired|invalid/i.test(q.get('error_description') + (q.get('error_code') || ''))) { history.replaceState(null, '', location.pathname + location.search); this.showLogin('That link has expired. Press "Forgot password?" to get a new one.'); return true; }
+      return false;
+    }
+    const { error } = await this.sb.auth.setSession({ access_token: q.get('access_token'), refresh_token: q.get('refresh_token') });
+    history.replaceState(null, '', location.pathname + location.search);        // the one-time sign-in must not stay in the address bar
+    if (error) { this.showLogin('That link has expired. Press "Forgot password?" to get a new one.'); return true; }
+    this.showNewPassword(); return true;
+  }
+  showNewPassword() {
+    const p1 = h('input', { class: 'input', id: 'np1', type: 'password', autocomplete: 'new-password', minlength: '8', required: true });
+    const p2 = h('input', { class: 'input', id: 'np2', type: 'password', autocomplete: 'new-password', minlength: '8', required: true });
+    const err = h('p', { class: 'error', role: 'alert' });
+    const btn = h('button', { class: 'btn primary', type: 'submit', style: { width: '100%', minHeight: '52px' } }, 'Save my new password');
+    const form = h('form', { novalidate: true },
+      h('div', { class: 'field' }, h('label', { for: 'np1' }, 'New password'), p1, h('span', { class: 'hint' }, 'At least 8 letters or numbers. Write it somewhere safe.')),
+      h('div', { class: 'field' }, h('label', { for: 'np2' }, 'Type it again'), p2), err, btn);
+    form.addEventListener('submit', async e => {
+      e.preventDefault(); err.textContent = '';
+      if (p1.value.length < 8) { err.textContent = 'The password needs at least 8 characters.'; return; }
+      if (p1.value !== p2.value) { err.textContent = 'The two passwords are not the same.'; return; }
+      btn.disabled = true; btn.textContent = 'Saving…';
+      const { error } = await this.sb.auth.updateUser({ password: p1.value });
+      if (error) { err.textContent = friendlyError(error); btn.disabled = false; btn.textContent = 'Save my new password'; return; }
+      toast('New password saved. You are signed in.', 'ok');
+      const { data: ok } = await this.sb.rpc('is_teacher');
+      if (!ok) { await this.sb.auth.signOut(); return this.showLogin('This account is not the teacher account.'); }
+      location.hash = ''; this.route();
+    });
+    this.root.replaceChildren(h('div', { class: 'entry' },
+      h('div', { class: 'side' }, brand(true), h('div', null, h('h1', null, 'Choose a new password'), h('p', { class: 'lead', style: { marginTop: '10px' } }, 'Type a new password for your teacher account.')), form),
+      h('div', { class: 'art', 'aria-hidden': 'true' }, artSvg())));
+    p1.focus();
+  }
+  forgotDialog(prefill = '') {
+    const email = h('input', { class: 'input', id: 'fe', type: 'email', autocomplete: 'username', inputmode: 'email', value: prefill, required: true });
+    const err = h('p', { class: 'error', role: 'alert' }), ok = h('p', { class: 'hint', role: 'status' });
+    const go = h('button', { class: 'btn primary' }, 'Send me the link');
+    const m = modal({ title: 'Forgot password?', body: h('div', null, h('p', null, 'Type your teacher email. We send a link there to choose a new password.'), h('div', { class: 'field' }, h('label', { for: 'fe' }, 'Email'), email), err, ok), actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Close'), go] });
+    go.addEventListener('click', async () => {
+      err.textContent = ''; ok.textContent = '';
+      const v = email.value.trim(); if (!v) { err.textContent = 'Type your email.'; return; }
+      go.disabled = true;
+      const { error } = await this.sb.auth.resetPasswordForEmail(v, { redirectTo: BASE });
+      go.disabled = false;
+      if (error) { err.textContent = /rate|seconds|too many/i.test(error.message) ? 'Please wait a minute, then try again.' : friendlyError(error); return; }
+      ok.textContent = 'If this email belongs to the teacher account, a link is on its way. Open the email on this device and press the link. It may take a minute: look in Spam too.';
+    });
+    setTimeout(() => email.focus(), 50);
   }
 
   // ----------------------------------------------------------------- sign in
@@ -71,7 +127,8 @@ export class TeacherApp {
       h('div', { class: 'field' }, h('label', { for: 'em' }, 'Email'), email),
       h('div', { class: 'field' }, h('label', { for: 'pw' }, 'Password'), pw),
       err, btn,
-      h('p', { style: { marginTop: '22px' } }, h('a', { href: '#/join' }, 'I am a student: enter a class code')));
+      h('p', { style: { marginTop: '14px' } }, h('button', { type: 'button', class: 'linklike', onclick: () => this.forgotDialog(email.value.trim()) }, 'Forgot password?')),
+      h('p', { style: { marginTop: '14px' } }, h('a', { href: '#/join' }, 'I am a student: enter a class code')));
     form.addEventListener('submit', async e => {
       e.preventDefault(); err.textContent = '';
       if (!email.value.trim() || !pw.value) { err.textContent = 'Type your email and password.'; return; }
