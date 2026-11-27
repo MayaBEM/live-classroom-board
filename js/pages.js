@@ -54,6 +54,10 @@ export async function addPagesToBoard(sb, boardId, startIdx, spec, progress = ()
       for (const p of info) rows.push({ kind: 'pdf', file_path: path, pdf_page: p.n, h: p.h });
       try { (doc.loadingTask || doc).destroy(); } catch (e) { /* ignore */ }
     }
+  } else if (spec.source === 'book') {              // the pages of a textbook: the same file as the book, no new upload
+    const b = spec.book; if (!b) throw new Error('Choose a textbook first.');
+    const from = Math.max(1, Math.min(b.pages, spec.from || 1)), to = Math.max(from, Math.min(b.pages, spec.to || b.pages));
+    for (let n = from; n <= to; n++) rows.push({ kind: 'pdf', file_path: b.file_path, pdf_page: n, h: (b.heights && b.heights[n - 1]) || 1414 });
   } else if (spec.source === 'images') {
     if (!spec.files.length) throw new Error('Choose at least one picture first.');
     for (let i = 0; i < spec.files.length; i++) {
@@ -83,6 +87,7 @@ export async function createBoard(sb, { title, classId, spec, mode = 'live', sta
   for (let tries = 0; tries < 6 && !board; tries++) {
     const row = { title, class_id: classId || null, code: makeCode(6), mode, starts_at: startsAt, due_at: dueAt };
     if (link) { row.link_url = link.url; row.link_note = link.note || null; }
+    if (spec && spec.source === 'book' && spec.book) row.book_id = spec.book.id;
     const { data, error } = await sb.from('boards').insert(row).select().single();
     if (!error) board = data;
     else if (error.code !== '23505') throw error;
@@ -94,7 +99,7 @@ export async function createBoard(sb, { title, classId, spec, mode = 'live', sta
   }
   try { await addPagesToBoard(sb, board.id, 0, spec, progress); }
   catch (e) { await deleteBoard(sb, board.id).catch(() => {}); throw e; }
-  try { await saveCover(sb, board.id); } catch (e) { /* the cover picture is a nice extra: the board is fine without it */ }
+  try { if (spec.source === 'book' && spec.book && spec.book.cover) await saveCoverImage(sb, board.id, spec.book.cover); else await saveCover(sb, board.id); } catch (e) { /* the cover picture is a nice extra: the board is fine without it */ }
   return board;
 }
 
@@ -115,8 +120,8 @@ export async function deleteClass(sb, classId) {
 }
 
 // ---------------------------------------------------------------- form used by "New board" and "Add pages"
-export function sourceForm({ defaultSource = 'pdf' } = {}) {
-  let src = defaultSource, orient = 'landscape';
+export function sourceForm({ defaultSource = 'pdf', books = [], book = null, onBook = null } = {}) {
+  let src = defaultSource, orient = 'landscape', bk = book || (books[0] || null);
   const file = h('input', { type: 'file', class: 'input', id: 'src-file', 'aria-label': 'Choose file' });
   const count = h('input', { type: 'number', class: 'input', id: 'src-count', min: '1', max: '40', value: '1', inputmode: 'numeric' });
   const fileBox = h('div', { class: 'field' }, h('label', { for: 'src-file' }, 'File'), file, h('span', { class: 'hint', id: 'src-hint' }));
@@ -124,20 +129,29 @@ export function sourceForm({ defaultSource = 'pdf' } = {}) {
   const patBox = h('div', null,
     h('div', { class: 'field' }, h('label', { for: 'src-count' }, 'How many pages?'), count),
     h('div', { class: 'field' }, h('span', { class: 'label' }, 'Page shape'), orientSeg));
+  // a textbook from the library: choose the book and, if wanted, the pages for this lesson
+  const bookSel = h('select', { class: 'select', id: 'src-book', 'aria-label': 'Textbook' }, books.map(b => h('option', { value: b.id, selected: bk && b.id === bk.id }, `${b.title} (${b.pages} pages)`)));
+  const from = h('input', { type: 'number', class: 'input', id: 'src-from', min: '1', value: '1', inputmode: 'numeric', style: { width: '90px' } }), to = h('input', { type: 'number', class: 'input', id: 'src-to', min: '1', value: String(bk ? bk.pages : 1), inputmode: 'numeric', style: { width: '90px' } });
+  const syncBook = () => { bk = books.find(b => b.id === bookSel.value) || null; from.value = '1'; to.value = String(bk ? bk.pages : 1); from.max = to.max = String(bk ? bk.pages : 1); if (bk && onBook) onBook(bk); };
+  bookSel.addEventListener('change', syncBook);
+  const bookBox = h('div', { class: 'field' }, h('label', { for: 'src-book' }, 'Textbook'), bookSel,
+    h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', marginTop: '8px', flexWrap: 'wrap' } }, h('label', { for: 'src-from' }, 'Pages from'), from, h('label', { for: 'src-to' }, 'to'), to),
+    h('span', { class: 'hint' }, 'The whole book is the default. Choose fewer pages to keep a lesson light. The book file is shared, nothing is uploaded again.'));
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Start from' });
-  const el = h('div', null, h('div', { class: 'field' }, h('span', { class: 'label' }, 'Start from'), seg), fileBox, patBox);
-  const SRC = [['pdf', 'PDF file'], ['images', 'Pictures'], ['blank', 'Blank'], ['lined', 'Lined'], ['grid', 'Grid']];
+  const el = h('div', null, h('div', { class: 'field' }, h('span', { class: 'label' }, 'Start from'), seg), fileBox, patBox, bookBox);
+  const SRC = [...(books.length ? [['book', 'My textbook']] : []), ['pdf', 'PDF file'], ['images', 'Pictures'], ['blank', 'Blank'], ['lined', 'Lined'], ['grid', 'Grid']];
   function draw() {
     seg.replaceChildren(...SRC.map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(src === k), onclick: () => { src = k; draw(); } }, label)));
     orientSeg.replaceChildren(...[['landscape', 'Wide'], ['portrait', 'Tall (A4)']].map(([k, label]) => h('button', { type: 'button', 'aria-pressed': String(orient === k), onclick: () => { orient = k; draw(); } }, label)));
-    const isFile = src === 'pdf' || src === 'images';
-    fileBox.hidden = !isFile; patBox.hidden = isFile;
+    const isFile = src === 'pdf' || src === 'images', isBook = src === 'book';
+    fileBox.hidden = !isFile; patBox.hidden = isFile || isBook; bookBox.hidden = !isBook;
+    if (isBook && bk && onBook) onBook(bk);
     file.accept = src === 'pdf' ? 'application/pdf,.pdf' : 'image/png,image/jpeg,image/webp,image/gif';
     file.multiple = true; file.value = '';
     fileBox.querySelector('#src-hint').textContent = src === 'pdf' ? 'Worksheets and exam papers. Up to 50 MB each.' : 'You can choose several pictures. Each picture becomes one page.';
   }
   draw();
-  return { el, spec: () => ({ source: src, files: [...(file.files || [])], count: parseInt(count.value, 10) || 1, orient }) };
+  return { el, spec: () => ({ source: src, files: [...(file.files || [])], count: parseInt(count.value, 10) || 1, orient, book: src === 'book' ? bk : null, from: parseInt(from.value, 10) || 1, to: parseInt(to.value, 10) || (bk ? bk.pages : 1) }) };
 }
 
 export function openAddPages({ sb, boardId, pages, onDone }) {

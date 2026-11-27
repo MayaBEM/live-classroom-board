@@ -1,5 +1,6 @@
 // Teacher side: sign-in, dashboard (classes + boards), opening a board.
 import { backfillCovers } from './covers.js';
+import { bookDialog, deleteBookDialog } from './books.js';
 import { h, toast, modal, confirmDialog, copyText, asset, joinUrl, classUrl, studentUrl, classShareMessage, studentPageMessage, BASE, makeCodes, makeCode } from './util.js';
 import { CONFIG } from '../config.js';
 import { iconEl } from './icons.js';
@@ -45,7 +46,7 @@ export function artSvg() {
 export class TeacherApp {
   constructor(root) {
     this.root = root; this.sb = makeClient('teacher');
-    this.sel = 'home'; this.classes = []; this.parts = []; this.boards = []; this.students = [];
+    this.sel = 'home'; this.books = []; this.classes = []; this.parts = []; this.boards = []; this.students = [];
     this.master = []; this.members = new Map(); this.apps = []; this.appLinks = new Map(); this.ideaMeta = new Map();   // appLinks: app id -> set of student ids   // master = the one list of students; members = board id -> set of student ids
     this.view = null;
   }
@@ -118,7 +119,7 @@ export class TeacherApp {
 
   // ----------------------------------------------------------------- dashboard
   async loadAll() {
-    const [c, b, s, ms, bm, ap, sa, im, pt] = await Promise.all([
+    const [c, b, s, ms, bm, ap, sa, im, pt, bk] = await Promise.all([
       this.sb.from('classes').select('*').order('name'),
       this.sb.from('boards').select('*, pages(count), classes(name)').order('created_at', { ascending: false }),
       this.sb.from('class_students').select('*').order('first_name'),
@@ -128,11 +129,12 @@ export class TeacherApp {
       this.sb.from('student_apps').select('app_id,student_id'),
       this.sb.from('idea_boards').select('student_id,n,updated_at,teacher_seen_at'),
       this.sb.from('participants').select('board_id,name,submitted_at,checked_at,score,comment'),
+      this.sb.from('textbooks').select('*').order('created_at', { ascending: false }),
     ]);
     const err = c.error || b.error || s.error || ms.error || bm.error || ap.error || sa.error || im.error;
     if (err) throw err;
     this.classes = c.data; this.boards = b.data; this.students = s.data; this.master = ms.data;
-    this.apps = ap.data; this.parts = pt.data || [];
+    this.apps = ap.data; this.parts = pt.data || []; this.books = bk.data || [];
     this.ideaMeta = new Map((im.data || []).map(r => [r.student_id, r]));
     if (!this._coverBackfill) { this._coverBackfill = true; setTimeout(() => backfillCovers(this.sb).catch(() => {}), 2500); }
     this.appLinks = new Map();
@@ -140,7 +142,7 @@ export class TeacherApp {
     this.members = new Map();
     (bm.data || []).forEach(r => { if (!this.members.has(r.board_id)) this.members.set(r.board_id, new Set()); this.members.get(r.board_id).add(r.student_id); });
     if (this.sel.startsWith('stu:')) { if (!this.master.some(x => 'stu:' + x.id === this.sel)) this.sel = 'students'; }
-    else if (this.sel !== 'home' && this.sel !== 'all' && this.sel !== 'students' && this.sel !== 'apps' && !this.classes.some(x => x.id === this.sel)) this.sel = 'home';
+    else if (this.sel !== 'home' && this.sel !== 'all' && this.sel !== 'students' && this.sel !== 'apps' && this.sel !== 'books' && !this.classes.some(x => x.id === this.sel)) this.sel = 'home';
   }
 
   async showDashboard() {
@@ -165,13 +167,14 @@ export class TeacherApp {
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'students'), onclick: () => { this.sel = 'students'; this.renderDashboard(); } }, 'All my students', h('span', { class: 'n' }, this.master.length)),
       this.master.map((m, i) => h('button', { class: 'tab c' + (i % 5 + 1), 'data-sid': m.id, 'aria-current': String(this.sel === 'stu:' + m.id), onclick: () => { this.sel = 'stu:' + m.id; this.renderDashboard(); } }, m.first_name, h('span', { class: 'n' }, this.boardsOfStudent(m).length))),
       h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'apps'), onclick: () => { this.sel = 'apps'; this.renderDashboard(); } }, 'App shelf', h('span', { class: 'n' }, this.apps.length)),
+      h('button', { class: 'tab stu', 'aria-current': String(this.sel === 'books'), onclick: () => { this.sel = 'books'; this.renderDashboard(); } }, 'Textbooks', h('span', { class: 'n' }, this.books.length)),
       h('h2', { style: { marginTop: '14px' } }, 'Classes'), tabs,
       h('button', { class: 'btn sm add', onclick: () => this.newClassDialog() }, iconEl('plus', 18), 'New class'));
 
     const main = h('main', { class: 'dash-main' });
     const stu = this.sel.startsWith('stu:') ? this.master.find(x => 'stu:' + x.id === this.sel) : null;
-    if (this.sel === 'home' || this.sel === 'students' || this.sel === 'apps' || stu) {
-      if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'home') main.append(this.homePanel()); else if (this.sel === 'apps') main.append(this.appsPanel()); else main.append(this.studentsPanel());
+    if (this.sel === 'home' || this.sel === 'students' || this.sel === 'apps' || this.sel === 'books' || stu) {
+      if (stu) main.append(...this.studentPagePanels(stu)); else if (this.sel === 'home') main.append(this.homePanel()); else if (this.sel === 'apps') main.append(this.appsPanel()); else if (this.sel === 'books') main.append(this.booksPanel()); else main.append(this.studentsPanel());
       this.root.replaceChildren(h('div', { class: 'dash' },
         this.topBar(),
         h('div', { class: 'dash-body' }, side, main)));
@@ -225,7 +228,7 @@ export class TeacherApp {
       try {
         const get = async (table, cols = '*') => { const { data, error } = await this.sb.from(table).select(cols); if (error) throw error; return data || []; };
         const out = { app: 'Bright EngMath Live Board', saved_at: new Date().toISOString() };
-        for (const [t, cols] of [['classes', '*'], ['students', '*'], ['class_students', '*'], ['boards', '*'], ['pages', '*'], ['board_students', '*'], ['apps', '*'], ['student_apps', '*'], ['idea_boards', '*'], ['participants', 'id,board_id,name,submitted_at,score,comment,created_at']]) { msg.textContent = 'Collecting ' + t + '…'; out[t] = await get(t, cols); }
+        for (const [t, cols] of [['classes', '*'], ['students', '*'], ['class_students', '*'], ['boards', '*'], ['pages', '*'], ['board_students', '*'], ['apps', '*'], ['textbooks', 'id,title,subject,file_path,pages,created_at'], ['student_apps', '*'], ['idea_boards', '*'], ['participants', 'id,board_id,name,submitted_at,score,comment,created_at']]) { msg.textContent = 'Collecting ' + t + '…'; out[t] = await get(t, cols); }
         const objs = []; for (let from = 0; ; from += 1000) { msg.textContent = `Collecting writing… ${objs.length}`; const { data, error } = await this.sb.from('objects').select('*').order('id').range(from, from + 999); if (error) throw error; objs.push(...data); if (data.length < 1000) break; }
         out.objects = objs;
         const counts = Object.fromEntries(Object.entries(out).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length]));
@@ -267,7 +270,7 @@ export class TeacherApp {
     return h('div', { class: 'board-row' + (b.mode === 'assignment' || isLink ? ' assign' : '') },
       h('div', null,
         h('button', { class: 'title', onclick: openIt }, b.title),
-        h('div', { class: 'meta' }, isLink ? h('span', { class: 'tag assign' }, 'Web link') : b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), (b.mode === 'assignment' || isLink) && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, isLink ? h('span', null, (() => { try { return new URL(b.link_url).hostname; } catch (e) { return 'link'; } })()) : h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), isScheduled(b) ? h('span', { class: 'tag sched', title: 'Students cannot see it until then. You can.' }, 'Hidden until ' + fmtWhen(b.starts_at)) : null, h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
+        h('div', { class: 'meta' }, isLink ? h('span', { class: 'tag assign' }, 'Web link') : b.mode === 'assignment' ? h('span', { class: 'tag assign' }, 'Assignment') : h('span', { class: 'tag live' }, 'Live class'), (b.mode === 'assignment' || isLink) && b.due_at ? h('span', null, 'Due ' + new Date(b.due_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })) : null, b.classes && b.classes.name ? h('span', null, b.classes.name) : null, b.book_id ? h('span', { class: 'tag', title: 'A lesson from a textbook' }, 'Textbook') : null, isLink ? h('span', null, (() => { try { return new URL(b.link_url).hostname; } catch (e) { return 'link'; } })()) : h('span', null, `${pages} page${pages === 1 ? '' : 's'}`), isScheduled(b) ? h('span', { class: 'tag sched', title: 'Students cannot see it until then. You can.' }, 'Hidden until ' + fmtWhen(b.starts_at)) : null, h('span', null, 'Code ', h('b', null, b.code)), h('span', null, new Date(b.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }))),
         this.whoLine(b), extra),
       h('div', { class: 'acts' }, sw,
         b.class_id ? h('button', { class: 'btn sm', title: 'Choose which students this board is for', onclick: () => boardStudentsDialog({ sb: this.sb, board: b, onSaved: async () => { await this.loadAll(); this.renderDashboard(); } }) }, 'Students') : null,
@@ -580,6 +583,26 @@ export class TeacherApp {
         : h('div', { class: 'empty' }, h('b', null, 'The shelf is empty. '), 'Press Add app, type a name and paste the link of a web app you made.'));
   }
 
+  // the textbooks: each book is added once; a lesson opens it for a class
+  booksPanel() {
+    const lessonsOf = bk => this.boards.filter(b => b.book_id === bk.id);
+    return h('section', { class: 'sheet-panel' },
+      h('header', null, h('h2', null, 'Textbooks'), h('button', { class: 'btn primary', onclick: () => bookDialog({ sb: this.sb, onSaved: () => this.refresh() }) }, iconEl('plus', 18), 'Add a textbook')),
+      h('p', { class: 'hint', style: { padding: '12px 18px 0' } }, 'Add each textbook (a PDF) here once. Press "New lesson" to open it for a class: students see the book on their page and you write on its pages. The same file is used for every lesson, and each lesson keeps what you wrote.'),
+      this.books.length ? h('div', { class: 'book-grid' }, this.books.map(bk => { const ls = lessonsOf(bk);
+        return h('div', { class: 'book-card' },
+          h('div', { class: 'bk-cover' }, bk.cover ? h('img', { src: bk.cover, alt: '' }) : h('span', { class: 'bk-ph' }, bk.title.charAt(0).toUpperCase())),
+          h('div', { class: 'bk-info' },
+            h('b', { class: 'bk-t' }, bk.title),
+            h('span', { class: 'bk-m' }, `${bk.pages} page${bk.pages === 1 ? '' : 's'}${bk.subject ? ' · ' + bk.subject : ''}`),
+            h('div', { class: 'bk-acts' },
+              h('button', { class: 'btn sm primary', onclick: () => this.newBoardDialog({ book: bk }) }, iconEl('plus', 18), 'New lesson'),
+              h('button', { class: 'btn sm', onclick: () => bookDialog({ sb: this.sb, book: bk, onSaved: () => this.refresh() }) }, 'Rename'),
+              h('button', { class: 'btn sm danger', 'aria-label': `Delete ${bk.title}`, onclick: () => deleteBookDialog({ sb: this.sb, book: bk, lessons: ls, onDone: () => this.refresh() }) }, iconEl('trash', 16))),
+            ls.length ? h('div', { class: 'bk-lessons' }, h('span', { class: 'bk-lh' }, `Lessons (${ls.length})`), ls.slice(0, 6).map(b => h('button', { class: 'chip', title: 'Open this lesson', onclick: () => { location.hash = '#/board/' + b.id; } }, b.title)), ls.length > 6 ? h('span', { class: 'hint' }, `and ${ls.length - 6} more in All boards`) : null) : h('span', { class: 'hint' }, 'No lesson yet.')));
+      })) : h('div', { class: 'empty' }, h('b', null, 'No textbook yet. '), 'Press Add a textbook and choose the PDF file of your book.'));
+  }
+
   // the students in one class
   classPanel(cls) {
     const mine = this.students.filter(s => s.class_id === cls.id);
@@ -742,23 +765,25 @@ export class TeacherApp {
     try { await deleteBoard(this.sb, b.id); await this.loadAll(); this.renderDashboard(); toast('Board deleted.', 'ok'); } catch (e) { toast(friendlyError(e), 'bad'); }
   }
 
-  newBoardDialog({ forStudent = null } = {}) {
+  newBoardDialog({ forStudent = null, book = null } = {}) {
     const title = h('input', { class: 'input', id: 'bt', placeholder: 'Example: Fractions worksheet 4', maxlength: '120' });
-    if (!forStudent && !this.classes.length) {
+    const noClass = !forStudent && !this.classes.length && this.master.length > 0;      // no class made: the board is for the students ticked below
+    if (!forStudent && !this.classes.length && !noClass) {
       const m0 = modal({ title: 'Make a class first', body: h('p', null, 'Boards belong to a class so that every student finds their own boards on one page. Make a class and add your students first, then add boards.'), actions: [h('button', { class: 'btn', onclick: () => m0.close() }, 'Close'), h('button', { class: 'btn primary', onclick: () => { m0.close(); this.newClassDialog(); } }, 'Make a class')] });
       return;
     }
-    const clsSel = forStudent ? { value: '' } : h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
-    const form = sourceForm({ defaultSource: 'pdf' });
+    const clsSel = forStudent || noClass ? { value: '' } : h('select', { class: 'select', id: 'bc' }, this.classes.map(c => h('option', { value: c.id, selected: c.id === (this.sel !== 'all' ? this.sel : this.classes[0].id) }, c.name)));
+    const form = sourceForm({ defaultSource: book ? 'book' : 'pdf', books: this.books || [], book, onBook: bk => { if (!title.value.trim() || title.dataset.auto === '1') { title.value = bk.title; title.dataset.auto = '1'; } } });
+    title.addEventListener('input', () => { title.dataset.auto = ''; });
     // who is this board for: the students of the chosen class, all ticked to begin with
     const whoBox = h('div', { class: 'field' });
     let who = null;
     const drawWho = () => {
-      const mem = this.students.filter(s => s.class_id === clsSel.value && s.student_id).map(s => ({ id: s.student_id, first_name: s.first_name, code: s.code }));
-      who = checklist(mem, mem.map(x => x.id), { empty: 'This class has no students yet. Add students to the class first (the board will be open to everyone who joins later).' });
-      whoBox.replaceChildren(h('span', { class: 'label' }, 'Who is this board for?'), h('span', { class: 'hint' }, 'Untick students who do not learn this topic. Only the ticked students see it.'), who.el);
+      const mem = noClass ? this.master.map(s => ({ id: s.id, first_name: s.first_name, code: s.code })) : this.students.filter(s => s.class_id === clsSel.value && s.student_id).map(s => ({ id: s.student_id, first_name: s.first_name, code: s.code }));
+      who = checklist(mem, noClass ? [] : mem.map(x => x.id), { empty: 'This class has no students yet. Add students to the class first (the board will be open to everyone who joins later).' });
+      whoBox.replaceChildren(h('span', { class: 'label' }, 'Who is this board for?'), h('span', { class: 'hint' }, noClass ? 'Tick the students for this board. Only the ticked students see it.' : 'Untick students who do not learn this topic. Only the ticked students see it.'), who.el);
     };
-    if (!forStudent) { clsSel.addEventListener('change', drawWho); drawWho(); }
+    if (!forStudent) { if (!noClass) clsSel.addEventListener('change', drawWho); drawWho(); }
     let mode = 'live';
     const startIn = h('input', { class: 'input', id: 'bs', type: 'datetime-local' }), dueIn = h('input', { class: 'input', id: 'bd', type: 'datetime-local' });
     const startField = h('div', { class: 'field' }, h('label', { for: 'bs' }, 'Students can see it from (optional)'), startIn, h('span', { class: 'hint' }, 'Leave empty to show it now. Until that time students do not see it at all. You always see it.'));
@@ -780,7 +805,7 @@ export class TeacherApp {
       title: forStudent ? `New work for ${forStudent.first_name}` : 'New board',
       body: h('div', null,
         h('div', { class: 'field' }, h('label', { for: 'bt' }, forStudent ? 'Name of the work' : 'Board name'), title),
-        forStudent ? h('p', { class: 'hint', style: { marginBottom: '10px' } }, `Only ${forStudent.first_name} sees this. It appears on their page as NEW.`) : [h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox],
+        forStudent ? h('p', { class: 'hint', style: { marginBottom: '10px' } }, `Only ${forStudent.first_name} sees this. It appears on their page as NEW.`) : [noClass ? null : h('div', { class: 'field' }, h('label', { for: 'bc' }, 'Class'), clsSel), whoBox],
         h('div', { class: 'field' }, h('span', { class: 'label' }, 'Type'), modeSeg, modeHint), startField, dates,
         form.el, linkBox, bar, msg, err),
       actions: [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), go],
@@ -788,7 +813,7 @@ export class TeacherApp {
     go.addEventListener('click', async () => {
       err.textContent = '';
       if (!title.value.trim()) { err.textContent = 'Give the board a name.'; title.focus(); return; }
-      const tot = forStudent ? 0 : this.students.filter(s => s.class_id === clsSel.value && s.student_id).length;
+      const tot = forStudent ? 0 : noClass ? this.master.length : this.students.filter(s => s.class_id === clsSel.value && s.student_id).length;
       if (tot && !who.size()) { err.textContent = 'Tick at least one student for this board.'; return; }
       go.disabled = true; bar.hidden = false;
       try {
@@ -801,7 +826,7 @@ export class TeacherApp {
           const { error } = await this.sb.from('board_students').insert({ board_id: b.id, student_id: forStudent.id });
           if (error) { await deleteBoard(this.sb, b.id).catch(() => {}); throw error; }
         }
-        if (tot && who.size() < tot) {
+        if (tot && (noClass || who.size() < tot)) {
           const { error } = await this.sb.from('board_students').insert(who.ids().map(id => ({ board_id: b.id, student_id: id })));
           if (error) toast('The board was made, but the student list was not saved. Press Students on the board to choose again.', 'bad');
         }
