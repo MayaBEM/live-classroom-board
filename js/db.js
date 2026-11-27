@@ -6,6 +6,8 @@ export function makeClient(kind) {
   const slot = new URLSearchParams(location.search).get('slot') || '';
   return window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY, {
     auth: { storageKey: `bem-${kind}${slot}`, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    // data requests are never taken from the browser's cache: an old error answer (for example from before a database fix) must not be served again
+    global: { fetch: (url, opts) => fetch(url, String(url).includes('/rest/v1/') ? { ...opts, cache: 'no-store' } : opts) },
     realtime: { params: { eventsPerSecond: 60 } },
   });
 }
