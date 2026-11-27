@@ -544,7 +544,7 @@ export class BoardView {
     const host = this.bmHost; if (!host || !host.isConnected) return;
     const ps = this.store.pages, marked = ps.map((p, i) => [p, i]).filter(([p]) => p.bookmarked);
     host.replaceChildren(h('span', { class: 'bm-l' }, iconEl('bookmark', 14), 'Bookmarks'),
-      marked.length ? marked.map(([p, i]) => h('button', { class: 'chip', title: `Go to page ${i + 1}`, onclick: () => this.setPage(p.id, { user: true }) }, String(i + 1))) : h('span', { class: 'bm-none' }, 'Tap the ribbon on a page to bookmark it'));
+      ...(marked.length ? marked.map(([p, i]) => h('button', { class: 'chip', title: `Go to page ${i + 1}`, onclick: () => this.setPage(p.id, { user: true }) }, String(i + 1))) : [h('span', { class: 'bm-none' }, 'Tap the ribbon on a page to bookmark it')]));
   }
   pageKey() { return 'bem-lastpage-' + this.store.boardId + (this.isTeacher ? '-t' : '-s'); }
   resumeId(ps) {
