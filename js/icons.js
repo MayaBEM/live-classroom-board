@@ -1,6 +1,7 @@
 // One icon family: 2px strokes, square caps and mitred corners, 24px grid.
 const P = {
   select: '<path d="M5.5 10C5.5 6.5 8.5 4.5 12 4.5s6.5 2 6.5 5-3 4.8-6.5 4.8c-.9 0-1.7-.1-2.4-.3" stroke-dasharray="2.2 2.4"/><path d="M9.8 13.2L8.6 19l2.4-1.3 1.6 2.6"/>',
+  bookmark: '<path d="M7 4h10v16l-5-4-5 4z"/>',
   move: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
   pen: '<path d="M4 20l1-5L16 4l4 4L9 19z"/><path d="M13 7l4 4"/>',
   highlighter: '<path d="M9 14l7-9 4 3-7 9z"/><path d="M9 14l-3 5 5-2"/><path d="M4 21h8"/>',

@@ -118,3 +118,46 @@ export function exportDialog({ sb, store, students, label }) {
     } catch (e) { if (!cancelled) err.textContent = friendlyError(e); go.disabled = false; bar.hidden = true; running = false; }
   });
 }
+
+// ---- some pages of a board as one PDF (the pages the teacher picked), with or without the writing on them
+export async function buildPagesPdf({ sb, store, pages, withMarks, onProgress, isCancelled }) {
+  const { PDFDocument } = await loadPdfLib();
+  const pdf = await PDFDocument.create(), A4w = 595;
+  for (let i = 0; i < pages.length; i++) {
+    if (isCancelled()) throw new Error('Cancelled');
+    const pg = pages[i]; onProgress(`Page ${i + 1} of ${pages.length}`, i / pages.length);
+    const objs = withMarks ? store.pageObjects(pg.id).filter(o => !o.deleted) : [];
+    const cv = await renderPageFull(sb, pg, objs, 1240);
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.88));
+    const img = await pdf.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    const ph = A4w * cv.height / cv.width, pp = pdf.addPage([A4w, ph]);
+    pp.drawImage(img, { x: 0, y: 0, width: A4w, height: ph });
+  }
+  pdf.setTitle(store.board.title); pdf.setProducer('Bright EngMath Live Board');
+  return pdf.save();
+}
+export function exportPagesDialog({ sb, store, pages, numbers }) {
+  const marks = h('input', { type: 'checkbox', id: 'xp-m', checked: true });
+  const bar = h('div', { class: 'progress', hidden: true }, h('div'));
+  const msg = h('p', { class: 'hint', style: { marginTop: '8px' } });
+  const err = h('p', { class: 'error', role: 'alert' });
+  let cancelled = false, running = false;
+  const go = h('button', { class: 'btn primary' }, iconEl('file', 18), 'Make PDF');
+  const m = modal({
+    title: `Export ${pages.length} page${pages.length === 1 ? '' : 's'} as PDF`,
+    body: h('div', null,
+      h('p', null, `One PDF with page ${numbers.length > 8 ? numbers.slice(0, 8).join(', ') + '…' : numbers.join(', ')} of "${store.board.title}".`),
+      h('label', { style: { display: 'flex', gap: '10px', alignItems: 'center', margin: '14px 0', fontWeight: '500' } }, marks, 'Include the writing and marks on the pages'),
+      bar, msg, err),
+    actions: [h('button', { class: 'btn', onclick: () => { cancelled = true; m.close(); } }, 'Close'), go],
+    onClose: () => { cancelled = true; },
+  });
+  go.addEventListener('click', async () => {
+    if (running) return; running = true; cancelled = false; err.textContent = ''; go.disabled = true; bar.hidden = false;
+    try {
+      const bytes = await buildPagesPdf({ sb, store, pages, withMarks: marks.checked, isCancelled: () => cancelled, onProgress: (t, f) => { msg.textContent = t; bar.firstChild.style.width = Math.round(f * 100) + '%'; } });
+      download(bytes, `${safe(store.board.title)}-pages.pdf`);
+      toast('PDF saved to your downloads.', 'ok'); cancelled = true; m.close();
+    } catch (e) { if (!cancelled) err.textContent = friendlyError(e); go.disabled = false; bar.hidden = true; running = false; }
+  });
+}

@@ -1112,3 +1112,18 @@ input, textarea, select { font-size: max(16px, 1em); }
 .bk-lessons { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .bk-lh { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .bk-lessons .chip { min-height: 28px; padding: 0 10px; font-size: 13px; background: #FFF3C4; border: 1px solid rgba(0,0,0,.3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* bookmarks and picking pages */
+.bm-btn[aria-pressed="true"] svg { fill: var(--orange); stroke: #B34A0B; }
+.thumb .bm-flag { position: absolute; right: 6px; top: 0; width: 14px; height: 24px; background: var(--orange); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.thumb .pick-mark { display: none; position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; place-items: center; background: var(--orange); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; font-size: 16px; line-height: 1; }
+.thumb.picked { outline: 3px solid var(--orange); outline-offset: 0; border-color: var(--orange); }
+.thumb.picked .pick-mark { display: grid; }
+.pg-tools { padding: 8px 10px; border-bottom: 1px solid var(--hair); display: grid; gap: 8px; background: #FBF8F1; }
+.bm-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bm-l { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; margin-right: 4px; }
+.bm-row .chip { min-height: 28px; min-width: 34px; padding: 0 8px; font-weight: 600; background: #FFE8D6; border: 1px solid rgba(0,0,0,.35); }
+.sel-row { display: grid; gap: 6px; }
+.sel-line { display: flex; gap: 6px; align-items: center; }
+.sel-line .input { flex: 1; min-width: 0; }
+.sel-n { margin-right: auto; font-size: 14px; }

@@ -10,7 +10,7 @@ import { renderPdfPage, getImage, pdfPageMm } from './pdf.js';
 import { Instruments } from './instruments.js';
 import { TimerController } from './timer.js';
 import { PageRenderer } from './thumbs.js';
-import { exportDialog } from './export.js';
+import { exportDialog, exportPagesDialog } from './export.js';
 import { shareDialog } from './share.js';
 import { CONFIG } from '../config.js';
 import { friendlyError } from './db.js';
@@ -82,7 +82,7 @@ export class BoardView {
     this.undoStack = []; this.redoStack = []; this.pointers = new Map();
     this.ghosts = new Map(); this.laserPts = []; this.cur = null; this.editor = null; this.hiddenId = null;
     this.following = false; this.followSeq = null; this.online = new Map(); this.panel = null; this.focusPerson = null;
-    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.sel = new Set(); this.selDrag = null; this.lasso = null; try { this.shapeFill = Math.min(2, Math.max(0, parseInt(localStorage.getItem('bem-shape-fill') || '0', 10) || 0)); } catch (e) { this.shapeFill = 0; } this.recentColors = loadRecent();
+    this.tap = new TwoFingerTap(); this.palmAt = -1e9; this.imgSel = null; this.imgDrag = null; this.sel = new Set(); this.selDrag = null; this.lasso = null; this.pageSel = null; try { this.shapeFill = Math.min(2, Math.max(0, parseInt(localStorage.getItem('bem-shape-fill') || '0', 10) || 0)); } catch (e) { this.shapeFill = 0; } this.recentColors = loadRecent();
     this.eraseMode = (() => { try { return localStorage.getItem('bem-erase-mode') === 'whole' ? 'whole' : 'part'; } catch (e) { return 'part'; } })(); this.eraseSizeIdx = 1; this.popOpen = true; this.stickerKind = 'bunny'; this.stickerGroup = 'cute'; this.tapeKind = 'gingham'; this.eraseIds = null; this.eraseAdd = null; this.eraseLast = null; this.baseTok = 0; this.thumbs = new Map(); this.thumbQueue = []; this.thumbBusy = 0;
     this.participants = []; this.spaceDown = false;
   }
@@ -121,7 +121,7 @@ export class BoardView {
     this.ro.observe(this.stage);
     this.keyHandler = e => this.onKey(e); this.keyUp = e => { if (e.code === 'Space') this.spaceDown = false; };
     document.addEventListener('keydown', this.keyHandler); document.addEventListener('keyup', this.keyUp);
-    const first = st.pages[0];
+    const first = st.pages.find(p => p.id === this.resumeId(st.pages)) || st.pages[0];      // the page this board was left on, or the first
     if (first) this.setPage(first.id);
     else this.showEmpty();
     this.onBoard(true);
@@ -525,10 +525,35 @@ export class BoardView {
         h('button', { class: 'ib', onclick: () => this.goPage(-1), 'aria-label': 'Previous page', title: 'Previous page' }, iconEl('left', 20)),
         h('span', { class: 'pg-num', 'aria-live': 'polite' }, ''),
         h('button', { class: 'ib', onclick: () => this.goPage(1), 'aria-label': 'Next page', title: 'Next page' }, iconEl('right', 20))),
+      this.isTeacher ? h('span', { class: 'sep' }) : null,
+      this.isTeacher ? h('button', { class: 'ib bm-btn', onclick: () => this.toggleBookmark(), 'aria-label': 'Bookmark this page', title: 'Bookmark this page, so you can come back to it', 'aria-pressed': 'false' }, iconEl('bookmark', 20)) : null,
     ];
   }
 
-  updatePager() { if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText(); }
+  updatePager() {
+    if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText();
+    const pg = this.page; for (const b of this.el.querySelectorAll('.bm-btn')) { b.setAttribute('aria-pressed', String(!!(pg && pg.bookmarked))); b.title = pg && pg.bookmarked ? 'Bookmarked. Tap to remove the bookmark' : 'Bookmark this page, so you can come back to it'; }
+  }
+  // ---- bookmarks: pages the teacher marks to come back to, and the page a board was left on
+  toggleBookmark() {
+    const pg = this.page; if (!pg || !this.isTeacher) return;
+    const val = !pg.bookmarked; pg.bookmarked = val; this.updatePager(); if (this.panel === 'pages') this.renderPagesPanel();
+    toast(val ? `Page ${this.store.pages.indexOf(pg) + 1} bookmarked.` : 'Bookmark removed.', 'ok');
+    this.sb.from('pages').update({ bookmarked: val }).eq('id', pg.id).then(({ error }) => { if (error) { pg.bookmarked = !val; this.updatePager(); toast('The bookmark was not saved.', 'bad'); } });
+  }
+  pageKey() { return 'bem-lastpage-' + this.store.boardId + (this.isTeacher ? '-t' : '-s'); }
+  resumeId(ps) {
+    let id = this.isTeacher && this.store.board ? this.store.board.resume_page : null;
+    try { id = id || localStorage.getItem(this.pageKey()); } catch (e) { /* fine */ }
+    return id && ps.some(p => p.id === id) ? id : null;
+  }
+  rememberPage(id) {
+    try { localStorage.setItem(this.pageKey(), id); } catch (e) { /* fine */ }
+    if (this.isTeacher && this.store.board && this.store.board.resume_page !== id) {
+      this.store.board.resume_page = id; clearTimeout(this._rp);
+      this._rp = setTimeout(() => { this.sb.from('boards').update({ resume_page: id }).eq('id', this.store.boardId).then(() => {}, () => {}); }, 1500);
+    }
+  }
 
   stampCol(k) { return this.stampColors[k] || STAMP_COLORS[k] || null; }
   stampPreview(k) {
@@ -597,7 +622,7 @@ export class BoardView {
     const pg = this.store.pages.find(p => p.id === id); if (!pg) return;
     if (user) this.userMoved();
     this.commitEditor(); this.clearSel();
-    this.pageId = id; this.cur = null; this.ghosts.clear(); this.laserPts = []; this.rectCache = null; this.clearStroke();
+    this.pageId = id; this.rememberPage(id); this.cur = null; this.ghosts.clear(); this.laserPts = []; this.rectCache = null; this.clearStroke();
     this.sheet.style.width = '1000px'; this.sheet.style.height = pg.h + 'px';
     if (!keepView) { this.autoFit = true; this.fitNow(false); }
     this.q = this.wantQ(); this.sizeCanvases(); this.renderBase(); this.renderInk(); this.renderLive();
@@ -653,7 +678,7 @@ export class BoardView {
     const ps = this.store.pages;
     if (this.empty && ps.length) { this.empty.remove(); this.empty = null; this.sheet.style.display = ''; }
     if (!ps.length) { this.pageId = null; this.showEmpty(); this.renderPanel(); return; }
-    if (!ps.some(p => p.id === this.pageId)) this.setPage(ps[0].id);
+    if (!ps.some(p => p.id === this.pageId)) this.setPage(this.resumeId(ps) || ps[0].id);
     else if (this.page && this.sheet.style.height !== this.page.h + 'px') this.setPage(this.pageId);
     this.updatePager();
     this.renderPanel();
@@ -1621,10 +1646,19 @@ export class BoardView {
   }
 
   renderPagesPanel() {
-    const ps = this.store.pages;
+    const ps = this.store.pages, T = this.isTeacher;
+    if (this.pageSel) { for (const id of [...this.pageSel]) if (!ps.some(p => p.id === id)) this.pageSel.delete(id); }
+    const sel = () => this.pageSel;
+    let lastClicked = -1;
     const list = ps.map((p, i) => {
       const cv = h('canvas', { width: 200, height: Math.round(200 * p.h / 1000) });
-      const b = h('button', { class: 'thumb', 'aria-label': `Page ${i + 1}`, 'aria-current': String(p.id === this.pageId), 'data-page': p.id, onclick: () => this.setPage(p.id, { user: true }) }, cv, h('span', { class: 'num' }, i + 1));
+      const b = h('button', { class: 'thumb' + (sel() && sel().has(p.id) ? ' picked' : ''), 'aria-label': `Page ${i + 1}`, 'aria-current': String(p.id === this.pageId), 'data-page': p.id,
+        onclick: e => {
+          if (!sel()) return this.setPage(p.id, { user: true });
+          if (e.shiftKey && lastClicked >= 0) { const [a, z] = [Math.min(lastClicked, i), Math.max(lastClicked, i)]; for (let k = a; k <= z; k++) sel().add(ps[k].id); }
+          else if (sel().has(p.id)) sel().delete(p.id); else sel().add(p.id);
+          lastClicked = i; this.refreshPageSel();
+        } }, cv, h('span', { class: 'num' }, i + 1), T && p.bookmarked ? h('span', { class: 'bm-flag', title: 'Bookmarked', 'aria-hidden': 'true' }) : null, h('span', { class: 'pick-mark', 'aria-hidden': 'true' }, '✓'));
       this.thumbs.set(p.id, { cv, btn: b, page: p, done: false });
       return b;
     });
@@ -1634,18 +1668,61 @@ export class BoardView {
       this.btnDelMine = h('button', { class: 'btn sm danger', onclick: () => { const cur = this.store.pages.find(p => p.id === this.pageId); if (cur && cur.owner_id) this.deleteMyPage(cur); } }, iconEl('trash', 18), 'Delete this page');
       foot.push(this.btnDelMine); this.updateMyPageButtons();
     }
-    if (this.isTeacher) {
+    // the teacher's tools: the bookmarks, and picking several pages to export or delete
+    const tools = [];
+    if (T) {
+      const marked = ps.map((p, i) => [p, i]).filter(([p]) => p.bookmarked);
+      if (marked.length) tools.push(h('div', { class: 'bm-row' }, h('span', { class: 'bm-l' }, iconEl('bookmark', 14), 'Bookmarks'), marked.map(([p, i]) => h('button', { class: 'chip', title: `Go to page ${i + 1}`, onclick: () => this.setPage(p.id, { user: true }) }, String(i + 1)))));
+      if (!this.pageSel) tools.push(h('div', { class: 'sel-row' }, h('button', { class: 'btn sm', disabled: ps.length < 1, onclick: () => { this.pageSel = new Set(); this.renderPagesPanel(); } }, iconEl('check', 16), 'Select pages')));
+      else {
+        const num = h('input', { class: 'input', placeholder: 'Pages like 3-7, 10', 'aria-label': 'Pick pages by number', inputmode: 'numeric', style: { minHeight: '32px', fontSize: '16px' } });
+        const pick = () => { const v = num.value; const add = new Set(); for (const part of v.split(',')) { const m = part.trim().match(/^(\d+)\s*(?:-\s*(\d+))?$/); if (!m) continue; const a = +m[1], z = +(m[2] || m[1]); for (let k = Math.min(a, z); k <= Math.max(a, z); k++) if (ps[k - 1]) add.add(ps[k - 1].id); } if (!add.size) return toast('Type page numbers, like 3-7, 10.'); add.forEach(id => this.pageSel.add(id)); num.value = ''; this.refreshPageSel(); };
+        num.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); pick(); } });
+        this.selCount = h('b', { class: 'sel-n' }, '0 selected');
+        tools.push(h('div', { class: 'sel-row on' },
+          h('div', { class: 'sel-line' }, this.selCount, h('button', { class: 'btn sm', onclick: () => { ps.forEach(p => this.pageSel.add(p.id)); this.refreshPageSel(); } }, 'All'), h('button', { class: 'btn sm', onclick: () => { this.pageSel.clear(); this.refreshPageSel(); } }, 'None')),
+          h('div', { class: 'sel-line' }, num, h('button', { class: 'btn sm', onclick: pick }, 'Pick'))));
+        this.selExport = h('button', { class: 'btn sm primary', onclick: () => this.exportSelectedPages() }, iconEl('file', 18), 'Export PDF');
+        this.selDelete = h('button', { class: 'btn sm danger', onclick: () => this.deleteSelectedPages() }, iconEl('trash', 18), 'Delete');
+        foot.push(this.selExport, this.selDelete, h('button', { class: 'btn sm', onclick: () => { this.pageSel = null; this.renderPagesPanel(); } }, 'Done'));
+      }
+    }
+    if (T && !this.pageSel) {
       foot.push(h('button', { class: 'btn sm primary', onclick: () => openAddPages({ sb: this.sb, boardId: this.store.boardId, pages: this.store.pages, onDone: () => { this.store.resync(); this.store.sendResync(); } }) }, iconEl('plus', 18), 'Add pages'));
       foot.push(h('button', { class: 'btn sm danger', disabled: ps.length < 1, onclick: () => this.deleteCurrentPage() }, iconEl('trash', 18), 'Delete this page'));
     }
     this.setSide(
       h('header', null, `Pages (${ps.length})`, h('button', { class: 'ib', 'aria-label': 'Close pages', onclick: () => this.togglePanel('pages') }, iconEl('close'))),
+      tools.length ? h('div', { class: 'pg-tools' }, tools) : null,
       h('div', { class: 'scroll' }, list.length ? list : h('p', { class: 'hint' }, 'No pages yet.')),
       foot.length ? h('footer', null, foot) : null);
+    this.refreshPageSel();
     if (!this.io) this.io = null;
     if (this.io) this.io.disconnect();
     this.io = new IntersectionObserver(es => { for (const en of es) if (en.isIntersecting) { const t = this.thumbs.get(en.target.dataset.page); if (t && !t.done) this.queueThumb(t); } }, { root: this.elSide.querySelector('.scroll'), rootMargin: '200px' });
     for (const t of this.thumbs.values()) if (t.btn.isConnected) this.io.observe(t.btn);
+  }
+  refreshPageSel() {
+    const S = this.pageSel; if (!S) return;
+    for (const [id, t] of this.thumbs) if (t.btn.isConnected) t.btn.classList.toggle('picked', S.has(id));
+    const n = S.size; if (this.selCount) this.selCount.textContent = `${n} selected`;
+    if (this.selExport) this.selExport.disabled = !n; if (this.selDelete) this.selDelete.disabled = !n;
+  }
+  selectedPages() { const ps = this.store.pages; return ps.map((p, i) => [p, i + 1]).filter(([p]) => this.pageSel && this.pageSel.has(p.id)); }
+  exportSelectedPages() {
+    const list = this.selectedPages(); if (!list.length) return;
+    exportPagesDialog({ sb: this.sb, store: this.store, pages: list.map(x => x[0]), numbers: list.map(x => x[1]) });
+  }
+  async deleteSelectedPages() {
+    const list = this.selectedPages(); if (!list.length) return;
+    const all = list.length === this.store.pages.length;
+    const ok = await confirmDialog({ title: `Delete ${list.length} page${list.length === 1 ? '' : 's'}?`, text: (all ? 'This is every page of the board. ' : '') + 'The pages and everything written on them will be removed for everyone. This cannot be undone.', confirmLabel: `Delete ${list.length} page${list.length === 1 ? '' : 's'}`, danger: true });
+    if (!ok) return;
+    const { error } = await this.sb.from('pages').delete().in('id', list.map(x => x[0].id));
+    if (error) return toast(friendlyError(error), 'bad');
+    this.pageSel = null;
+    await this.store.resync(true); this.store.sendResync();
+    toast(`${list.length} page${list.length === 1 ? '' : 's'} deleted.`, 'ok');
   }
 
   markThumbCurrent() { for (const [id, t] of this.thumbs) if (t.btn.isConnected) t.btn.setAttribute('aria-current', String(id === this.pageId)); }
