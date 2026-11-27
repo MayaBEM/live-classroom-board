@@ -1114,8 +1114,6 @@ input, textarea, select { font-size: max(16px, 1em); }
 .bk-lessons .chip { min-height: 28px; padding: 0 10px; font-size: 13px; background: #FFF3C4; border: 1px solid rgba(0,0,0,.3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* bookmarks and picking pages */
-.bm-btn[aria-pressed="true"] svg { fill: var(--orange); stroke: #B34A0B; }
-.thumb .bm-flag { position: absolute; right: 6px; top: 0; width: 14px; height: 24px; background: var(--orange); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
 .thumb .pick-mark { display: none; position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; place-items: center; background: var(--orange); color: var(--ink); border: 2px solid var(--ink); font-weight: 700; font-size: 16px; line-height: 1; }
 .thumb.picked { outline: 3px solid var(--orange); outline-offset: 0; border-color: var(--orange); }
 .thumb.picked .pick-mark { display: grid; }
@@ -1130,15 +1128,12 @@ input, textarea, select { font-size: max(16px, 1em); }
 
 .linklike { background: none; border: 0; padding: 0; color: var(--ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 32px; }
 
-/* the bookmark ribbon on the top right of the page */
-.bm-tab { position: absolute; z-index: 6; width: 44px; height: 60px; padding: 0; border: 0; background: none; cursor: pointer; touch-action: manipulation; filter: drop-shadow(0 2px 2px rgba(30,30,20,.28)); transition: transform .12s; transform-origin: 50% 0; }
-.bm-tab svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.bm-tab path { fill: rgba(255,255,255,.88); stroke: #6b6f66; stroke-width: 2; stroke-dasharray: 4 3; }
-.bm-tab:hover path { fill: #FFE8D6; }
-.bm-tab[aria-pressed="true"] path { fill: var(--orange); stroke: #B34A0B; stroke-dasharray: none; stroke-width: 2.5; }
-.bm-tab[aria-pressed="true"] { transform: translateY(0); }
-.bm-tab.pop { animation: bm-pop .28s ease-out; }
-.bm-tab[hidden] { display: none; }
-@keyframes bm-pop { 0% { transform: translateY(-16px) scaleY(.7); } 60% { transform: translateY(3px) scaleY(1.06); } 100% { transform: translateY(0) scaleY(1); } }
-@media (pointer: coarse) { .bm-tab { width: 50px; height: 66px; } }
-@media (prefers-reduced-motion: reduce) { .bm-tab.pop { animation: none; } }
+/* the bookmark ribbon on a small page in the pages bar: small, always there, one touch */
+.thumb-wrap { position: relative; }
+.tb-bm { position: absolute; right: 4px; top: 0; z-index: 3; width: 34px; height: 38px; padding: 0; border: 0; background: none; cursor: pointer; display: grid; place-items: start center; touch-action: manipulation; }
+.tb-bm[hidden] { display: none; }
+.tb-bm svg { width: 18px; height: 22px; overflow: visible; filter: drop-shadow(0 1px 1px rgba(30,30,20,.3)); }
+.tb-bm path { fill: rgba(255,255,255,.9); stroke: #6b6f66; stroke-width: 2; }
+.tb-bm:hover path { fill: #FFE8D6; }
+.tb-bm[aria-pressed="true"] path { fill: var(--orange); stroke: #B34A0B; }
+.bm-none { font-size: 12px; color: var(--ink-2); }

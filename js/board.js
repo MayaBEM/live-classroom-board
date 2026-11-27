@@ -160,16 +160,7 @@ export class BoardView {
     this.sheet.append(this.cBase, this.cUnder, this.cHl, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
-    // the bookmark: a ribbon on the top right corner of the page (teacher). One touch sets it, one more takes it off.
-    this.bmTab = this.isTeacher ? h('button', { class: 'bm-tab', type: 'button', 'aria-label': 'Bookmark this page', 'aria-pressed': 'false', title: 'Bookmark this page, so you can come back to it' },
-      (() => { const n = 'http://www.w3.org/2000/svg', sv = document.createElementNS(n, 'svg'); sv.setAttribute('viewBox', '0 0 44 60'); sv.setAttribute('aria-hidden', 'true'); const p = document.createElementNS(n, 'path'); p.setAttribute('d', 'M2 0h40v58L22 44 2 58z'); sv.append(p); return sv; })()) : null;
-    if (this.bmTab) {
-      const hit = e => { e.preventDefault(); e.stopPropagation(); this.toggleBookmark(); };
-      this.bmTab.addEventListener('pointerdown', hit);                                  // at the first touch, not after the finger is lifted
-      this.bmTab.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (e.detail === 0) this.toggleBookmark(); });   // (a keyboard press)
-      for (const t of ['pointerup', 'dblclick', 'contextmenu']) this.bmTab.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); });
-    }
-    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.bmTab, this.banner, this.zoomPill);
+    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
     this.elSide = h('aside', { class: 'b-side' });
     this.drawer = h('aside', { class: 'work-drawer', 'aria-label': 'My work', hidden: true });
     this.drawerBack = h('div', { class: 'work-back', hidden: true, onclick: () => this.closeWork() });
@@ -539,19 +530,21 @@ export class BoardView {
 
   updatePager() {
     if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText();
-    const pg = this.page, b = this.bmTab; if (b) { b.setAttribute('aria-pressed', String(!!(pg && pg.bookmarked))); b.title = pg && pg.bookmarked ? 'Bookmarked. Tap to remove the bookmark' : 'Bookmark this page, so you can come back to it'; b.hidden = !pg; }
-  }
-  // the ribbon sits on the top right of the page; when the page is bigger than the screen it stays on the visible top right corner
-  positionBm() {
-    const b = this.bmTab, pg = this.page; if (!b || !pg) return;
-    const { w } = this.stageSize(), v = this.view, right = Math.min(v.tx + 1000 * v.s, w) - 18, top = Math.max(v.ty, this.insetTop() - 6);
-    b.style.left = Math.max(8, right - 40) + 'px'; b.style.top = Math.max(0, top - 2) + 'px';
   }
   // ---- bookmarks: pages the teacher marks to come back to, and the page a board was left on
-  toggleBookmark() {
-    const pg = this.page; if (!pg || !this.isTeacher) return;
-    const val = !pg.bookmarked; pg.bookmarked = val; this.updatePager(); if (this.bmTab) { this.bmTab.classList.remove('pop'); void this.bmTab.offsetWidth; this.bmTab.classList.add('pop'); } if (this.panel === 'pages') this.renderPagesPanel();
-    this.sb.from('pages').update({ bookmarked: val }).eq('id', pg.id).then(({ error }) => { if (error) { pg.bookmarked = !val; this.updatePager(); toast('The bookmark was not saved.', 'bad'); } });
+  toggleBookmark(pg = this.page) {
+    if (!pg || !this.isTeacher) return;
+    const val = !pg.bookmarked; pg.bookmarked = val;
+    const t = this.thumbs.get(pg.id); if (t && t.bm) t.bm.setAttribute('aria-pressed', String(val));
+    this.drawBmRow();
+    this.sb.from('pages').update({ bookmarked: val }).eq('id', pg.id).then(({ error }) => { if (error) { pg.bookmarked = !val; if (t && t.bm) t.bm.setAttribute('aria-pressed', String(!val)); this.drawBmRow(); toast('The bookmark was not saved.', 'bad'); } });
+  }
+  // the row of bookmarked page numbers at the top of the pages bar
+  drawBmRow() {
+    const host = this.bmHost; if (!host || !host.isConnected) return;
+    const ps = this.store.pages, marked = ps.map((p, i) => [p, i]).filter(([p]) => p.bookmarked);
+    host.replaceChildren(h('span', { class: 'bm-l' }, iconEl('bookmark', 14), 'Bookmarks'),
+      marked.length ? marked.map(([p, i]) => h('button', { class: 'chip', title: `Go to page ${i + 1}`, onclick: () => this.setPage(p.id, { user: true }) }, String(i + 1))) : h('span', { class: 'bm-none' }, 'Tap the ribbon on a page to bookmark it'));
   }
   pageKey() { return 'bem-lastpage-' + this.store.boardId + (this.isTeacher ? '-t' : '-s'); }
   resumeId(ps) {
@@ -737,7 +730,6 @@ export class BoardView {
     const v = this.view;
     this.sheet.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.s})`;
     this.sheet.style.borderWidth = Math.max(1, 1 / v.s) + 'px';
-    this.positionBm();
     this.positionImgBox();
     this.scheduleQuality();
     if (this.instr && this.instr.any() || (this.instr && this.instr.remote)) { if (!this._ir) { this._ir = true; requestAnimationFrame(() => { this._ir = false; this.instr.render(); }); } }
@@ -1671,9 +1663,13 @@ export class BoardView {
           if (e.shiftKey && lastClicked >= 0) { const [a, z] = [Math.min(lastClicked, i), Math.max(lastClicked, i)]; for (let k = a; k <= z; k++) sel().add(ps[k].id); }
           else if (sel().has(p.id)) sel().delete(p.id); else sel().add(p.id);
           lastClicked = i; this.refreshPageSel();
-        } }, cv, h('span', { class: 'num' }, i + 1), T && p.bookmarked ? h('span', { class: 'bm-flag', title: 'Bookmarked', 'aria-hidden': 'true' }) : null, h('span', { class: 'pick-mark', 'aria-hidden': 'true' }, '✓'));
-      this.thumbs.set(p.id, { cv, btn: b, page: p, done: false });
-      return b;
+        } }, cv, h('span', { class: 'num' }, i + 1), h('span', { class: 'pick-mark', 'aria-hidden': 'true' }, '✓'));
+      // the bookmark ribbon on the corner of the small page: one touch sets it
+      const bm = T ? h('button', { class: 'tb-bm', type: 'button', 'aria-label': `Bookmark page ${i + 1}`, title: `Bookmark page ${i + 1}`, 'aria-pressed': String(!!p.bookmarked), hidden: !!this.pageSel,
+        onpointerdown: e => { e.preventDefault(); e.stopPropagation(); this.toggleBookmark(p); }, onclick: e => { e.preventDefault(); e.stopPropagation(); if (e.detail === 0) this.toggleBookmark(p); } },
+        (() => { const n = 'http://www.w3.org/2000/svg', sv = document.createElementNS(n, 'svg'); sv.setAttribute('viewBox', '0 0 24 30'); sv.setAttribute('aria-hidden', 'true'); const pa = document.createElementNS(n, 'path'); pa.setAttribute('d', 'M2 1h20v27l-10-7-10 7z'); sv.append(pa); return sv; })()) : null;
+      this.thumbs.set(p.id, { cv, btn: b, bm, page: p, done: false });
+      return h('div', { class: 'thumb-wrap' }, b, bm);
     });
     const foot = [];
     if (this.copy && !this.isTeacher) {       // a student can add pages of their own to their copy
@@ -1684,8 +1680,7 @@ export class BoardView {
     // the teacher's tools: the bookmarks, and picking several pages to export or delete
     const tools = [];
     if (T) {
-      const marked = ps.map((p, i) => [p, i]).filter(([p]) => p.bookmarked);
-      if (marked.length) tools.push(h('div', { class: 'bm-row' }, h('span', { class: 'bm-l' }, iconEl('bookmark', 14), 'Bookmarks'), marked.map(([p, i]) => h('button', { class: 'chip', title: `Go to page ${i + 1}`, onclick: () => this.setPage(p.id, { user: true }) }, String(i + 1)))));
+      this.bmHost = h('div', { class: 'bm-row' }); tools.push(this.bmHost);
       if (!this.pageSel) tools.push(h('div', { class: 'sel-row' }, h('button', { class: 'btn sm', disabled: ps.length < 1, onclick: () => { this.pageSel = new Set(); this.renderPagesPanel(); } }, iconEl('check', 16), 'Select pages')));
       else {
         const num = h('input', { class: 'input', placeholder: 'Pages like 3-7, 10', 'aria-label': 'Pick pages by number', inputmode: 'numeric', style: { minHeight: '32px', fontSize: '16px' } });
@@ -1709,7 +1704,7 @@ export class BoardView {
       tools.length ? h('div', { class: 'pg-tools' }, tools) : null,
       h('div', { class: 'scroll' }, list.length ? list : h('p', { class: 'hint' }, 'No pages yet.')),
       foot.length ? h('footer', null, foot) : null);
-    this.refreshPageSel();
+    this.drawBmRow(); this.refreshPageSel();
     if (!this.io) this.io = null;
     if (this.io) this.io.disconnect();
     this.io = new IntersectionObserver(es => { for (const en of es) if (en.isIntersecting) { const t = this.thumbs.get(en.target.dataset.page); if (t && !t.done) this.queueThumb(t); } }, { root: this.elSide.querySelector('.scroll'), rootMargin: '200px' });
