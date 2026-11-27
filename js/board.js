@@ -551,7 +551,6 @@ export class BoardView {
   toggleBookmark() {
     const pg = this.page; if (!pg || !this.isTeacher) return;
     const val = !pg.bookmarked; pg.bookmarked = val; this.updatePager(); if (this.bmTab) { this.bmTab.classList.remove('pop'); void this.bmTab.offsetWidth; this.bmTab.classList.add('pop'); } if (this.panel === 'pages') this.renderPagesPanel();
-    toast(val ? `Page ${this.store.pages.indexOf(pg) + 1} bookmarked.` : 'Bookmark removed.', 'ok');
     this.sb.from('pages').update({ bookmarked: val }).eq('id', pg.id).then(({ error }) => { if (error) { pg.bookmarked = !val; this.updatePager(); toast('The bookmark was not saved.', 'bad'); } });
   }
   pageKey() { return 'bem-lastpage-' + this.store.boardId + (this.isTeacher ? '-t' : '-s'); }
