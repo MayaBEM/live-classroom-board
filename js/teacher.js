@@ -52,7 +52,7 @@ export class TeacherApp {
   }
 
   async init() {
-    addEventListener('hashchange', () => this.route());
+    addEventListener('hashchange', async () => { if (/type=recovery|error_code=/.test(location.hash) && await this.handleRecoveryLink()) return; this.route(); });
     if (await this.handleRecoveryLink()) return;          // the link from the "forgot password" email: choose a new password
     const { data: { session } } = await this.sb.auth.getSession();
     if (!session) return this.showLogin();
