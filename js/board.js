@@ -160,7 +160,16 @@ export class BoardView {
     this.sheet.append(this.cBase, this.cUnder, this.cHl, this.cInk, this.cStroke, this.cLive, this.overlay, this.loadingEl);
     this.banner = h('div', { class: 'banner', hidden: true });
     this.zoomPill = h('div', { class: 'zoom-pill' }, ...this.navControls());
-    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.banner, this.zoomPill);
+    // the bookmark: a ribbon on the top right corner of the page (teacher). One touch sets it, one more takes it off.
+    this.bmTab = this.isTeacher ? h('button', { class: 'bm-tab', type: 'button', 'aria-label': 'Bookmark this page', 'aria-pressed': 'false', title: 'Bookmark this page, so you can come back to it' },
+      (() => { const n = 'http://www.w3.org/2000/svg', sv = document.createElementNS(n, 'svg'); sv.setAttribute('viewBox', '0 0 44 60'); sv.setAttribute('aria-hidden', 'true'); const p = document.createElementNS(n, 'path'); p.setAttribute('d', 'M2 0h40v58L22 44 2 58z'); sv.append(p); return sv; })()) : null;
+    if (this.bmTab) {
+      const hit = e => { e.preventDefault(); e.stopPropagation(); this.toggleBookmark(); };
+      this.bmTab.addEventListener('pointerdown', hit);                                  // at the first touch, not after the finger is lifted
+      this.bmTab.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); if (e.detail === 0) this.toggleBookmark(); });   // (a keyboard press)
+      for (const t of ['pointerup', 'dblclick', 'contextmenu']) this.bmTab.addEventListener(t, e => { e.stopPropagation(); e.preventDefault(); });
+    }
+    this.stage = h('main', { class: 'b-stage', 'aria-label': 'Page' }, this.sheet, this.bmTab, this.banner, this.zoomPill);
     this.elSide = h('aside', { class: 'b-side' });
     this.drawer = h('aside', { class: 'work-drawer', 'aria-label': 'My work', hidden: true });
     this.drawerBack = h('div', { class: 'work-back', hidden: true, onclick: () => this.closeWork() });
@@ -525,19 +534,23 @@ export class BoardView {
         h('button', { class: 'ib', onclick: () => this.goPage(-1), 'aria-label': 'Previous page', title: 'Previous page' }, iconEl('left', 20)),
         h('span', { class: 'pg-num', 'aria-live': 'polite' }, ''),
         h('button', { class: 'ib', onclick: () => this.goPage(1), 'aria-label': 'Next page', title: 'Next page' }, iconEl('right', 20))),
-      this.isTeacher ? h('span', { class: 'sep' }) : null,
-      this.isTeacher ? h('button', { class: 'ib bm-btn', onclick: () => this.toggleBookmark(), 'aria-label': 'Bookmark this page', title: 'Bookmark this page, so you can come back to it', 'aria-pressed': 'false' }, iconEl('bookmark', 20)) : null,
     ];
   }
 
   updatePager() {
     if (!this.el) return; for (const e of this.el.querySelectorAll('.pg-num')) e.textContent = this.pagerText();
-    const pg = this.page; for (const b of this.el.querySelectorAll('.bm-btn')) { b.setAttribute('aria-pressed', String(!!(pg && pg.bookmarked))); b.title = pg && pg.bookmarked ? 'Bookmarked. Tap to remove the bookmark' : 'Bookmark this page, so you can come back to it'; }
+    const pg = this.page, b = this.bmTab; if (b) { b.setAttribute('aria-pressed', String(!!(pg && pg.bookmarked))); b.title = pg && pg.bookmarked ? 'Bookmarked. Tap to remove the bookmark' : 'Bookmark this page, so you can come back to it'; b.hidden = !pg; }
+  }
+  // the ribbon sits on the top right of the page; when the page is bigger than the screen it stays on the visible top right corner
+  positionBm() {
+    const b = this.bmTab, pg = this.page; if (!b || !pg) return;
+    const { w } = this.stageSize(), v = this.view, right = Math.min(v.tx + 1000 * v.s, w) - 18, top = Math.max(v.ty, this.insetTop() - 6);
+    b.style.left = Math.max(8, right - 40) + 'px'; b.style.top = Math.max(0, top - 2) + 'px';
   }
   // ---- bookmarks: pages the teacher marks to come back to, and the page a board was left on
   toggleBookmark() {
     const pg = this.page; if (!pg || !this.isTeacher) return;
-    const val = !pg.bookmarked; pg.bookmarked = val; this.updatePager(); if (this.panel === 'pages') this.renderPagesPanel();
+    const val = !pg.bookmarked; pg.bookmarked = val; this.updatePager(); if (this.bmTab) { this.bmTab.classList.remove('pop'); void this.bmTab.offsetWidth; this.bmTab.classList.add('pop'); } if (this.panel === 'pages') this.renderPagesPanel();
     toast(val ? `Page ${this.store.pages.indexOf(pg) + 1} bookmarked.` : 'Bookmark removed.', 'ok');
     this.sb.from('pages').update({ bookmarked: val }).eq('id', pg.id).then(({ error }) => { if (error) { pg.bookmarked = !val; this.updatePager(); toast('The bookmark was not saved.', 'bad'); } });
   }
@@ -725,6 +738,7 @@ export class BoardView {
     const v = this.view;
     this.sheet.style.transform = `translate(${v.tx}px, ${v.ty}px) scale(${v.s})`;
     this.sheet.style.borderWidth = Math.max(1, 1 / v.s) + 'px';
+    this.positionBm();
     this.positionImgBox();
     this.scheduleQuality();
     if (this.instr && this.instr.any() || (this.instr && this.instr.remote)) { if (!this._ir) { this._ir = true; requestAnimationFrame(() => { this._ir = false; this.instr.render(); }); } }
