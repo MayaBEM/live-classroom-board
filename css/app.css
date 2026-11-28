@@ -1145,3 +1145,4 @@ input, textarea, select { font-size: max(16px, 1em); }
 .sw-del:hover { background: #F8C9C5; }
 .b-pop .cedit { margin-left: 2px; }
 @media (pointer: coarse) { .sw-del { width: 22px; height: 22px; top: -9px; right: -9px; font-size: 16px; } }
+.sw-wrap > .sw { display: block; }
