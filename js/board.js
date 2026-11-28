@@ -478,8 +478,9 @@ export class BoardView {
       });
       kids.push(h('div', { class: 'grp wrap', role: 'group', 'aria-label': 'Colour' },
         pal.map(([name, hex]) => h('button', { class: 'sw', style: { background: hex }, 'aria-label': name, title: name, 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
-        mine.map(hex => h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
-        h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+'))));
+        mine.map(hex => this.colorEdit ? this.editableColour(hex, cur, setCol, pal) : h('button', { class: 'sw', style: { background: hex }, 'aria-label': 'My colour ' + hex, title: 'My colour', 'aria-pressed': String(cur === hex), onclick: () => { setCol(hex); this.renderOpts(); } })),
+        h('label', { class: 'sw custom', title: 'Choose any colour' }, inp, h('span', { 'aria-hidden': 'true' }, '+')),
+        mine.length || this.colorEdit ? h('button', { class: 'btn sm cedit' + (this.colorEdit ? ' on' : ''), 'aria-pressed': String(!!this.colorEdit), title: 'Change or delete the colours you added', onclick: () => { this.colorEdit = !this.colorEdit; this.renderOpts(); } }, this.colorEdit ? 'Done' : 'Edit') : null));
       kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Size' }, sizes(i => { this.sizeIdx = i; this.applyEditorStyle(); this.renderOpts(); })));
       if (t === 'rect' || t === 'ellipse') kids.push(h('span', { class: 'sep' }), h('div', { class: 'grp', role: 'group', 'aria-label': 'Fill' },
         [[0, 'Outline'], [1, 'Solid'], [2, 'See-through']].map(([k, label]) => h('button', { class: 'btn sm' + (this.shapeFill === k ? ' on' : ''), 'aria-pressed': String(this.shapeFill === k), title: k === 2 ? 'Colour like a highlighter: you can still read what is under it' : label, onclick: () => { this.shapeFill = k; try { localStorage.setItem('bem-shape-fill', String(k)); } catch (e) { /* fine */ } this.renderOpts(); } }, label))));
@@ -560,6 +561,25 @@ export class BoardView {
     }
   }
 
+  // a colour you added, in "Edit" mode: tap the colour to change it, tap the small x to delete it
+  editableColour(hex, cur, setCol, pal) {
+    const save = () => saveRecent(this.recentColors);
+    const inp = h('input', { type: 'color', class: 'sw-input', 'aria-label': 'Change this colour', value: hex.toLowerCase() });
+    const swap = (from, to) => { const i = this.recentColors.indexOf(from); if (i >= 0) this.recentColors[i] = to; else this.recentColors.unshift(to); this.recentColors = this.recentColors.filter((x, k, a) => a.indexOf(x) === k).slice(0, 8); };
+    let now = hex;
+    inp.addEventListener('input', () => { if (this.copy && isRedish(inp.value)) return; swap(now, inp.value); if (cur === now) setCol(inp.value); now = inp.value; inp.parentElement.style.background = inp.value; });
+    inp.addEventListener('change', () => {
+      if (this.copy && isRedish(inp.value)) { toast('Red is kept for your teacher. Please choose another colour.', 'bad'); }
+      save(); this.renderOpts();
+    });
+    const del = h('button', { type: 'button', class: 'sw-del', 'aria-label': 'Delete this colour', title: 'Delete this colour', onclick: e => {
+      e.stopPropagation(); this.recentColors = this.recentColors.filter(x => x !== hex); save();
+      if (cur === hex) setCol(pal[0][1]);
+      this.renderOpts();
+    } }, '×');
+    const sw = h('label', { class: 'sw', style: { background: hex }, title: 'Change this colour' }, inp);
+    return h('span', { class: 'sw-wrap' }, sw, del);
+  }
   stampCol(k) { return this.stampColors[k] || STAMP_COLORS[k] || null; }
   stampPreview(k) {
     const c = document.createElement('canvas'); c.width = 96; c.height = 56; c.style.width = '48px'; c.style.height = '28px';
